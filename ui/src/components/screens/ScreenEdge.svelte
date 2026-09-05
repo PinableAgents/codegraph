@@ -73,22 +73,25 @@
 
 <style>
   :global(.svelte-flow__edge-path.sedge) {
-    stroke: var(--ink);
-    stroke-opacity: 0.32;
+    stroke: var(--route-branch);
+    stroke-opacity: 0.52;
     fill: none;
+    transition: stroke 150ms ease, stroke-opacity 150ms ease;
   }
   :global(.svelte-flow__edge-path.sedge.synth) {
     stroke-dasharray: 5 3;
   }
   :global(.svelte-flow__edge-path.sedge.back) {
-    stroke: var(--accent);
-    stroke-opacity: 0.6;
+    stroke: var(--route-return);
+    stroke-opacity: 0.82;
     stroke-dasharray: 4 3;
   }
   :global(.svelte-flow__edge-path.sedge.hot) {
+    stroke: var(--route-main);
     stroke-opacity: 0.95;
   }
   :global(.svelte-flow__edge-path.sedge.back.hot) {
+    stroke: var(--route-return);
     stroke-opacity: 0.85;
   }
   /* Another of the selected screen's lines is in focus: this one recedes,
@@ -114,8 +117,8 @@
     box-sizing: border-box;
     height: 17px;
     padding: 0 5px;
-    border: 1px solid var(--rule);
-    background: var(--paper);
+    border: 1px solid var(--route-branch);
+    background: var(--paper-2);
     color: var(--ink-2);
     font: 400 10.5px var(--mono);
     line-height: 15px;
@@ -127,8 +130,8 @@
     color: var(--ink);
   }
   .spill.focus {
-    border-color: var(--ink);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+    border-color: var(--route-main);
+    box-shadow: inset 2px 0 0 var(--route-main);
   }
   /* The whole condition, for the row under the pointer in the panel: it may
      wrap, and it may cover its neighbours — it is on top, and transient. */

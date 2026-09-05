@@ -97,8 +97,9 @@
     align-items: center;
     gap: 22px;
     padding: 0 18px;
-    background: var(--paper);
-    border-bottom: 1px solid var(--rule);
+    background: var(--paper-2);
+    border-bottom: 1px solid var(--route-branch);
+    box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--route-branch) 18%, transparent);
     position: relative;
     z-index: 30;
   }
@@ -111,11 +112,12 @@
 
   .brand-mark {
     display: inline-block;
-    width: 10px;
-    height: 10px;
+    width: 12px;
+    height: 12px;
     align-self: center;
-    border: 1.5px solid var(--ink);
+    border: 2px solid var(--route-main);
     background: var(--paper);
+    box-shadow: inset 0 0 0 2px var(--paper), inset 0 0 0 4px var(--route-main);
   }
 
   .brand-name {
@@ -135,6 +137,7 @@
   }
 
   .views a {
+    position: relative;
     padding: 5px 10px;
     color: var(--ink-2);
     border-bottom: 2px solid transparent;
@@ -146,7 +149,21 @@
 
   .views a.active {
     color: var(--ink);
-    border-bottom-color: var(--ink);
+    border-bottom-color: var(--route-main);
+    background: var(--route-band);
+  }
+
+  .views a.active::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    bottom: -4px;
+    width: 6px;
+    height: 6px;
+    border: 1px solid var(--route-main);
+    border-radius: 50% !important;
+    background: var(--paper-2);
+    transform: translateX(-50%);
   }
 
   .project {
@@ -170,8 +187,9 @@
   }
 
   .language button.active {
-    border-color: var(--ink-2);
+    border-color: var(--route-main);
     color: var(--ink);
+    box-shadow: inset 2px 0 0 var(--route-main);
   }
 
   .offline {

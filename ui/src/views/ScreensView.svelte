@@ -535,10 +535,14 @@
   .stage {
     position: relative;
     overflow: hidden;
-    background: var(--paper);
+    background-color: var(--paper);
+    background-image:
+      linear-gradient(var(--route-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--route-grid) 1px, transparent 1px);
+    background-size: 24px 24px;
   }
   .stage :global(.svelte-flow) {
-    background: var(--paper);
+    background-color: transparent;
   }
   .stage :global(.svelte-flow__handle) {
     opacity: 0;
@@ -555,14 +559,14 @@
     pointer-events: none;
   }
   .stage :global(.svelte-flow__controls-button) {
-    background: var(--paper);
+    background: var(--paper-2);
     border: 0;
     border-bottom: 1px solid var(--rule-soft);
     border-radius: 0;
-    color: var(--ink-2);
+    color: var(--route-branch);
   }
   .stage :global(.svelte-flow__controls-button svg) {
-    fill: var(--ink-2);
+    fill: var(--route-branch);
   }
   .state {
     padding: 48px 40px;
@@ -578,8 +582,8 @@
     bottom: 12px;
     z-index: 4;
     max-width: 380px;
-    border: 1px solid var(--rule);
-    background: var(--paper);
+    border: 1px solid var(--route-branch);
+    background: var(--paper-2);
     font-size: 11.5px;
     color: var(--ink-2);
   }
@@ -610,8 +614,8 @@
     justify-content: center;
   }
   .k-line {
-    stroke: var(--ink);
-    stroke-opacity: 0.6;
+    stroke: var(--route-branch);
+    stroke-opacity: 0.8;
     stroke-width: 1.5;
     fill: none;
   }
@@ -619,7 +623,7 @@
     stroke-dasharray: 5 3;
   }
   .k-line.k-back {
-    stroke: var(--accent);
+    stroke: var(--route-return);
     stroke-opacity: 0.8;
     stroke-dasharray: 4 3;
   }
@@ -630,7 +634,7 @@
   .k-box {
     box-sizing: border-box;
     padding: 1px 5px;
-    border: 1px solid var(--ink);
+    border: 1px solid var(--route-branch);
     font-size: 10.5px;
     color: var(--ink);
     line-height: 14px;
@@ -654,9 +658,9 @@
     z-index: 5;
     width: 340px;
     padding: 8px 10px;
-    border: 1px solid var(--ink);
-    background: var(--paper);
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+    border: 1px solid var(--route-main);
+    background: var(--paper-2);
+    box-shadow: inset 3px 0 0 var(--route-main);
     font-size: 12px;
     pointer-events: none;
     /* A long via chain or condition wraps inside the box. */
@@ -671,10 +675,12 @@
     border-top: 1px solid var(--rule-soft);
   }
   .side {
-    border-left: 1px solid var(--rule);
+    border-left: 1px solid var(--route-branch);
     padding: 14px 16px;
     overflow: auto;
     font-size: 12.5px;
+    background: var(--paper-2);
+    box-shadow: inset 3px 0 0 color-mix(in srgb, var(--route-branch) 28%, transparent);
   }
   .head {
     display: flex;
@@ -686,6 +692,8 @@
   .big {
     font-size: 15px;
     font-weight: 600;
+    padding-left: 8px;
+    border-left: 3px solid var(--route-main);
   }
   .sub {
     display: flex;
@@ -699,7 +707,7 @@
     text-decoration: underline;
   }
   .act {
-    color: var(--accent);
+    color: var(--accent-ink);
   }
   .clear {
     border: 1px solid var(--rule);
@@ -725,10 +733,11 @@
     padding: 7px 8px;
     margin: 0 -8px;
     border-top: 1px solid var(--rule-soft);
-    transition: background 90ms linear;
+    transition: background 150ms ease, box-shadow 150ms ease;
   }
   .row.hot {
-    background: var(--press);
+    background: var(--route-band);
+    box-shadow: inset 3px 0 0 var(--route-main);
   }
   .peer {
     display: block;
@@ -785,6 +794,6 @@
     color: var(--ink-3);
   }
   .mark {
-    color: var(--accent);
+    color: var(--route-main);
   }
 </style>

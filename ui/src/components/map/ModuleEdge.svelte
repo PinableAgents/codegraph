@@ -50,19 +50,21 @@
 
 <style>
   :global(.svelte-flow__edge-path.medge) {
-    stroke: var(--ink);
-    stroke-opacity: 0.28;
+    stroke: var(--route-branch);
+    stroke-opacity: 0.48;
     fill: none;
+    transition: stroke 150ms ease, stroke-opacity 150ms ease;
   }
   :global(.svelte-flow__edge-path.medge.hot) {
+    stroke: var(--route-main);
     stroke-opacity: 0.95;
   }
   :global(.svelte-flow__edge-path.medge.dimmed) {
     stroke-opacity: 0.06;
   }
   :global(.svelte-flow__edge-path.medge.back) {
-    stroke: var(--accent);
-    stroke-opacity: 0.6;
+    stroke: var(--route-return);
+    stroke-opacity: 0.82;
     stroke-dasharray: 4 3;
   }
   .hit {

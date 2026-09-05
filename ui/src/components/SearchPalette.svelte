@@ -173,7 +173,8 @@
   }
 
   #q:focus {
-    border-color: var(--ink);
+    border-color: var(--route-main);
+    box-shadow: inset 3px 0 0 var(--route-main);
     outline: none;
   }
 

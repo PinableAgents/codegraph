@@ -42,7 +42,7 @@
   const above = $derived(d.link.labelLines);
 </script>
 
-<BaseEdge {path} class={`flink${d.dimmed ? ' dimmed' : ''}`} style={dashStyle} />
+<BaseEdge {path} class={`flink${d.link.cap ? ' cap' : ''}${d.dimmed ? ' dimmed' : ''}`} style={dashStyle} />
 {#if !d.link.cap}
   <polygon class={`fhead${d.dimmed ? ' dimmed' : ''}`} points={head} />
 {/if}
@@ -58,24 +58,30 @@
 
 <style>
   :global(.svelte-flow__edge-path.flink) {
-    stroke: var(--ink-3);
-    stroke-width: 1px;
+    stroke: var(--route-main);
+    stroke-width: 1.5px;
     fill: none;
+    transition: stroke 150ms ease, stroke-opacity 150ms ease;
   }
   :global(.svelte-flow__edge-path.flink.dimmed) {
-    stroke-opacity: 0.25;
+    stroke: var(--route-branch);
+    stroke-opacity: 0.42;
+  }
+  :global(.svelte-flow__edge-path.flink.cap) {
+    stroke: var(--route-muted);
   }
   .fhead {
-    fill: var(--ink-3);
+    fill: var(--route-main);
   }
   .fhead.dimmed {
-    fill-opacity: 0.25;
+    fill: var(--route-branch);
+    fill-opacity: 0.42;
   }
   .flabel text {
-    fill: var(--ink-3);
+    fill: var(--ink-2);
     font: 11px var(--mono);
   }
   .flabel.dimmed text {
-    fill-opacity: 0.25;
+    fill-opacity: 0.5;
   }
 </style>

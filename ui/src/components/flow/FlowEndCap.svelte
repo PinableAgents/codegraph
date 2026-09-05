@@ -97,7 +97,8 @@
     box-sizing: border-box;
     padding: 12px;
     background: var(--paper);
-    border: 1px dashed var(--rule-soft);
+    border: 1px dashed var(--route-muted);
+    box-shadow: inset 3px 0 0 var(--route-muted);
     color: var(--ink-2);
     font-size: 12px;
     line-height: 1.45;
@@ -155,7 +156,7 @@
   }
 
   .row:hover .nm {
-    color: var(--accent);
+    color: var(--accent-ink);
   }
 
   .nm {

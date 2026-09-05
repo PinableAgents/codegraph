@@ -862,10 +862,14 @@
   .stage {
     position: relative;
     overflow: hidden;
-    background: var(--paper);
+    background-color: var(--paper);
+    background-image:
+      linear-gradient(var(--route-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--route-grid) 1px, transparent 1px);
+    background-size: 24px 24px;
   }
   .stage :global(.svelte-flow) {
-    background: var(--paper);
+    background-color: transparent;
   }
   .stage :global(.svelte-flow__handle) {
     opacity: 0;
@@ -880,14 +884,14 @@
     pointer-events: none;
   }
   .stage :global(.svelte-flow__controls-button) {
-    background: var(--paper);
+    background: var(--paper-2);
     border: 0;
     border-bottom: 1px solid var(--rule-soft);
     border-radius: 0;
-    color: var(--ink-2);
+    color: var(--route-branch);
   }
   .stage :global(.svelte-flow__controls-button svg) {
-    fill: var(--ink-2);
+    fill: var(--route-branch);
   }
   .state {
     padding: 48px 40px;
@@ -939,9 +943,9 @@
     z-index: 5;
     width: 400px;
     padding: 8px 10px;
-    border: 1px solid var(--ink);
-    background: var(--paper);
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+    border: 1px solid var(--route-main);
+    background: var(--paper-2);
+    box-shadow: inset 3px 0 0 var(--route-main);
     font-size: 12px;
     pointer-events: none;
     /* A call with its arguments is one long token: it wraps inside the box. */
@@ -962,10 +966,12 @@
     border-top: 1px solid var(--rule-soft);
   }
   .side {
-    border-left: 1px solid var(--rule);
+    border-left: 1px solid var(--route-branch);
     padding: 14px 16px;
     overflow: auto;
     font-size: 12.5px;
+    background: var(--paper-2);
+    box-shadow: inset 3px 0 0 color-mix(in srgb, var(--route-branch) 28%, transparent);
   }
   .head {
     display: flex;
@@ -977,6 +983,8 @@
   .big {
     font-size: 15px;
     font-weight: 600;
+    padding-left: 8px;
+    border-left: 3px solid var(--route-main);
     /* An effect's label is a call with its arguments — one long token. */
     overflow-wrap: anywhere;
   }
@@ -992,7 +1000,7 @@
     text-decoration: underline;
   }
   .act {
-    color: var(--accent);
+    color: var(--accent-ink);
   }
   .clear {
     border: 1px solid var(--rule);
@@ -1035,7 +1043,7 @@
   .tab.on {
     color: var(--ink);
     font-weight: 600;
-    border-bottom-color: var(--accent);
+    border-bottom-color: var(--route-main);
   }
   .depth {
     font: inherit;
@@ -1059,10 +1067,11 @@
     padding: 7px 8px;
     margin: 0 -8px;
     border-top: 1px solid var(--rule-soft);
-    transition: background 90ms linear;
+    transition: background 150ms ease, box-shadow 150ms ease;
   }
   .row.hot {
-    background: var(--press);
+    background: var(--route-band);
+    box-shadow: inset 3px 0 0 var(--route-main);
   }
   .peer {
     display: block;
@@ -1138,6 +1147,6 @@
     color: var(--ink-3);
   }
   .mark {
-    color: var(--accent);
+    color: var(--route-main);
   }
 </style>

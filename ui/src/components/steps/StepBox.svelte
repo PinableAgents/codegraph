@@ -83,20 +83,35 @@
 
 <style>
   .snode {
+    position: relative;
     display: flex;
     flex-direction: column;
     justify-content: center;
     gap: 1px;
     box-sizing: border-box;
     padding: 0 9px;
-    border: 1px solid var(--ink);
+    border: 1px solid var(--rule-soft);
     border-radius: 0;
     background: var(--paper);
     text-align: left;
     cursor: pointer;
     font: inherit;
     color: var(--ink);
-    transition: background 90ms linear;
+    box-shadow: inset 3px 0 0 var(--route-branch);
+    transition: background 150ms ease, border-color 150ms ease, box-shadow 150ms ease, color 150ms ease;
+  }
+  .snode::before {
+    content: '';
+    position: absolute;
+    left: -5px;
+    top: 50%;
+    width: 8px;
+    height: 8px;
+    border: 2px solid var(--route-branch);
+    border-radius: 50% !important;
+    background: var(--paper);
+    transform: translateY(-50%);
+    transition: border-color 150ms ease, background 150ms ease;
   }
   /* On the rail a box sizes to its words, and wears its padding itself. */
   .snode.rail {
@@ -106,20 +121,30 @@
   }
   .snode:hover,
   .snode.sel {
-    border-width: 2px;
-    padding: 0 8px;
+    border-color: var(--route-main);
+    box-shadow: inset 3px 0 0 var(--route-main), 0 0 0 1px var(--route-main);
   }
   .snode.rail:hover,
   .snode.rail.sel {
-    padding: 4px 8px;
+    padding: 5px 9px;
   }
   .snode:hover,
   .snode.sel {
-    background: var(--press);
+    background: var(--route-band);
+  }
+  .snode:hover::before,
+  .snode.sel::before,
+  .snode.anchor::before {
+    border-color: var(--route-main);
+    background: var(--route-main);
   }
   .snode.dimmed {
-    border-color: var(--ink-4);
+    border-color: var(--rule-faint);
     color: var(--ink-4);
+    box-shadow: inset 3px 0 0 var(--route-muted);
+  }
+  .snode.dimmed::before {
+    border-color: var(--route-muted);
   }
   .snode.dimmed .sub {
     color: var(--ink-4);
@@ -127,7 +152,7 @@
   /* The language changes under the code: a rule where it does. */
   .snode.k-bridge,
   .snode.k-event {
-    border-left: 3px solid var(--accent);
+    border-left: 3px solid var(--route-main);
     padding-left: 7px;
   }
   .snode.k-bridge:hover,
@@ -139,7 +164,7 @@
   }
   .snode.k-bridge.dimmed,
   .snode.k-event.dimmed {
-    border-left-color: var(--accent-line);
+    border-left-color: var(--route-muted);
   }
   .snode.k-store {
     background: var(--paper-2);
@@ -151,7 +176,13 @@
   /* Outside the index: a place the graph cannot follow into. */
   .snode.k-effect {
     border-style: dashed;
-    border-color: var(--ink-3);
+    border-color: var(--route-muted);
+    box-shadow: none;
+  }
+  .snode.k-effect:hover,
+  .snode.k-effect.sel {
+    border-color: var(--route-main);
+    box-shadow: inset 3px 0 0 var(--route-main), 0 0 0 1px var(--route-main);
   }
   .snode:focus-visible {
     outline: 2px solid var(--accent);
@@ -166,7 +197,7 @@
     max-width: 100%;
   }
   .mark {
-    color: var(--accent);
+    color: var(--route-main);
     margin-right: 5px;
     font-size: 9px;
     vertical-align: 1px;
