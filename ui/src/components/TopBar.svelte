@@ -4,6 +4,7 @@
   import SearchPalette from './SearchPalette.svelte';
   import { live } from '../lib/live.svelte';
   import { i18n } from '../lib/i18n.svelte';
+  import { themePreference } from '../lib/theme-preference.svelte';
 
   interface Props {
     /** Indexed project name, e.g. "codegraph/". Null until stats load. */
@@ -19,6 +20,11 @@
   let search: SearchPalette | null = $state(null);
 
   let view = $derived(router.route.view);
+  const themeOptions = [
+    { value: 'auto', label: 'theme.auto' },
+    { value: 'light', label: 'theme.light' },
+    { value: 'dark', label: 'theme.dark' },
+  ] as const;
 
   // The Symbol tab returns you to where you were reading, not to a blank
   // view: the current symbol if you are on one, else the trail's last hop.
@@ -78,6 +84,17 @@
 
   <SearchPalette bind:this={search} />
 
+  <div class="theme" role="group" aria-label={i18n.t('a11y.theme')}>
+    {#each themeOptions as option (option.value)}
+      <button
+        type="button"
+        class:active={themePreference.current === option.value}
+        aria-pressed={themePreference.current === option.value}
+        onclick={() => themePreference.setTheme(option.value)}
+      >{i18n.t(option.label)}</button>
+    {/each}
+  </div>
+
   <div class="language" role="group" aria-label={i18n.t('a11y.language')}>
     <button type="button" class:active={i18n.locale === 'zh-CN'} aria-pressed={i18n.locale === 'zh-CN'} onclick={() => i18n.setLocale('zh-CN')}>{i18n.t('language.chinese')}</button>
     <button type="button" class:active={i18n.locale === 'en'} aria-pressed={i18n.locale === 'en'} onclick={() => i18n.setLocale('en')}>{i18n.t('language.english')}</button>
@@ -93,7 +110,7 @@
 <style>
   .topbar {
     display: grid;
-    grid-template-columns: auto auto 1fr auto auto;
+    grid-template-columns: auto auto minmax(140px, 1fr) auto auto auto;
     align-items: center;
     gap: 22px;
     padding: 0 18px;
@@ -172,11 +189,18 @@
     white-space: nowrap;
   }
 
+  .theme,
   .language {
     display: flex;
     gap: 2px;
   }
 
+  .theme {
+    padding-left: 8px;
+    border-left: 1px solid var(--rule-soft);
+  }
+
+  .theme button,
   .language button {
     padding: 3px 6px;
     border: 1px solid var(--rule-soft);
@@ -186,6 +210,7 @@
     font-size: 11px;
   }
 
+  .theme button.active,
   .language button.active {
     border-color: var(--route-main);
     color: var(--ink);
@@ -201,12 +226,19 @@
     font-size: 11.5px;
   }
 
-  /* Below ~1000px the stats are the first thing worth losing — but not the
-     note that the page has stopped updating itself. */
-  @media (max-width: 1000px) {
+  /* 新增主题控制后，项目摘要先让出横向空间；实时状态仍保持可见。 */
+  @media (max-width: 1180px) {
     .project .mono,
     .project .dim {
       display: none;
+    }
+  }
+
+  /* Below ~1000px the stats are the first thing worth losing — but not the
+     note that the page has stopped updating itself. */
+  @media (max-width: 1000px) {
+    .topbar {
+      gap: 14px;
     }
   }
 </style>
