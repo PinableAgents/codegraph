@@ -176,8 +176,8 @@
   bottom: 12px;
   z-index: 4;
   max-width: 400px;
-  border: 1px solid var(--rule);
-  background: var(--paper);
+  border: 1px solid var(--route-branch);
+  background: var(--paper-2);
   font-size: 11.5px;
   color: var(--ink-2);
 }
@@ -208,8 +208,8 @@
   justify-content: center;
 }
 .k-line {
-  stroke: var(--ink);
-  stroke-opacity: 0.6;
+  stroke: var(--route-branch);
+  stroke-opacity: 0.8;
   stroke-width: 1.5;
   fill: none;
 }
@@ -217,7 +217,7 @@
   stroke-dasharray: 5 3;
 }
 .k-line.k-back {
-  stroke: var(--accent);
+  stroke: var(--route-return);
   stroke-opacity: 0.8;
   stroke-dasharray: 4 3;
 }
@@ -228,30 +228,30 @@
 .k-cap {
   font-size: 10.5px;
   color: var(--ink-3);
-  border-bottom: 1px solid var(--rule-soft);
+  border-bottom: 1px solid var(--route-branch);
   padding-bottom: 2px;
 }
 .k-box {
   box-sizing: border-box;
   padding: 1px 5px;
-  border: 1px solid var(--ink);
+  border: 1px solid var(--route-branch);
   font-size: 10.5px;
   color: var(--ink);
   line-height: 14px;
 }
 .k-box.k-cross {
-  border-left: 3px solid var(--accent);
+  border-left: 3px solid var(--route-main);
 }
 .k-box.k-store {
   background: var(--paper-2);
 }
 .k-box.k-effect {
   border-style: dashed;
-  border-color: var(--ink-3);
+  border-color: var(--route-muted);
 }
 /* The decision's point draws quieter than a step, on the canvas and here. */
 .k-box.k-fork {
-  border-color: var(--ink-2);
+  border-color: var(--route-branch);
 }
 .k-anchor .mark {
   font-size: 8px;

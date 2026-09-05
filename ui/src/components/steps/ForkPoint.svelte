@@ -68,14 +68,16 @@
     justify-content: center;
     box-sizing: border-box;
     padding: 0 9px;
-    border: 1px solid var(--ink-2);
-    background: var(--paper);
+    border: 1px solid var(--route-branch);
+    background: var(--route-band);
     color: var(--ink);
+    box-shadow: inset 3px 0 0 var(--route-branch);
     user-select: none;
   }
   .fpoint.dimmed {
-    border-color: var(--ink-4);
+    border-color: var(--route-muted);
     color: var(--ink-4);
+    box-shadow: inset 3px 0 0 var(--route-muted);
   }
   .q {
     font: 400 12px var(--mono);

@@ -17,9 +17,10 @@
   .rcap {
     box-sizing: border-box;
     padding-bottom: 4px;
-    border-bottom: 1px solid var(--rule-soft);
+    border-bottom: 1px solid var(--route-branch);
     font: 500 11px/16px var(--mono);
-    color: var(--ink-3);
+    color: var(--ink-2);
+    background: color-mix(in srgb, var(--route-band) 72%, transparent);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

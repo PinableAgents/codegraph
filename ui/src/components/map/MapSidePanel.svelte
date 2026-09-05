@@ -265,15 +265,18 @@
 
 <style>
   .mapside {
-    border-left: 1px solid var(--rule-soft);
+    border-left: 1px solid var(--route-branch);
     overflow: auto;
     padding: 14px 16px;
-    background: var(--paper);
+    background: var(--paper-2);
+    box-shadow: inset 3px 0 0 color-mix(in srgb, var(--route-branch) 28%, transparent);
   }
   h2 {
     margin: 0 0 6px;
     font-size: 15px;
     font-weight: 600;
+    padding-left: 8px;
+    border-left: 3px solid var(--route-main);
   }
   p {
     margin: 0 0 10px;

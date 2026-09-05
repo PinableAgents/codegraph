@@ -21,30 +21,37 @@ Prototype sources: `CodeGraph/codegraph-web-prototype/` (`proto.css`, `proto.js`
 
 ## 2. Visual language
 
-The engine's paper/ink editorial system (`site/src/styles/theme.css`): flat, hairline rules, **square corners everywhere**
-(`border-radius: 0 !important` globally), no shadows, no gradients, sentence case, **no tiny all-caps tracked labels**,
-one oxblood accent used only for focus/selection/edges, one amber used only for the "untested" warning.
+当前主题采用“交通线路 + 战术站点”的专业开发工具表达：方形节点承载真实代码信息，站点圆环和左侧状态轨表达
+位置，线路颜色表达关系状态。游戏感集中在线路画布，不使用插画、3D、霓虹 HUD、圆角卡片堆叠或装饰性文案。
+线型和粗细继续分别表达置信度与关系权重，因此所有状态在无彩色情况下仍可区分。
+
+后文附录中的早期 prototype CSS 仅保留为历史测量参考；其旧配色和“单强调色”约束不再是主题来源。
 Syntax highlighting is deliberately near-monochrome so the graph's edges are the only colour in the code.
 
 ### 2.1 Color tokens
 
 | token | light | dark | used for |
 |---|---|---|---|
-| `--paper` | `#f7f6f2` | `#16150f` | page/body background (always set explicitly) |
-| `--paper-2` | `#f1efe8` | `#1c1a14` | trail bar, inputs, hovered code line, figure grounds |
-| `--press` | `#e8e6dd` | `#23211a` | hover fills, inline code background, bars |
-| `--press-2` | `#dedbd0` | `#2c2a22` | reserved (pressed state) |
-| `--ink` | `#16150f` | `#f3f1ea` | primary text, node borders, major rules |
-| `--ink-2` | `#56544a` | `#b8b5a8` | secondary text, strings, callers' names when uncertain |
-| `--ink-3` | `#87847a` | `#87847a` | tertiary text, comments, glyph borders, edge labels |
-| `--ink-4` | `#b4b1a5` | `#5d5b52` | line numbers, resting connectors, dimmed map nodes |
-| `--rule` | `#16150f` | `#f3f1ea` | top bar bottom rule, code/blast section rules |
-| `--rule-soft` | `#d6d3c8` | `#34322a` | rail dividers, chips, card borders |
-| `--rule-faint` | `#e6e3d9` | `#26241d` | row separators, map layer lines |
-| `--accent` | `#7a2230` | `#d48b96` | oxblood: call-site links, current trail hop, hot connectors, selected map edges |
-| `--accent-ink` | `#5e1a25` | `#e5a5ae` | accent text on accent-soft |
-| `--accent-soft` | `#f0e3e5` | `#33201f` | tinted rows ("you came from here"), hot code lines |
-| `--accent-line` | `#d9b3b9` | `#6b3a42` | accent borders/underlines at rest |
+| `--paper` | `#f3f6f2` | `#0b151b` | 页面与画布底色 |
+| `--paper-2` | `#eaf0eb` | `#111f26` | 顶栏、路径栏、详情面板和输入框 |
+| `--press` | `#dfe9e3` | `#19303a` | 悬停与按压反馈 |
+| `--press-2` | `#cfddd6` | `#24414b` | 更强的按压反馈 |
+| `--ink` | `#122026` | `#e8f1ee` | 主要文字和关键规则线 |
+| `--ink-2` | `#41555c` | `#b3c3bf` | 次级文字、字符串和线路标签 |
+| `--ink-3` | `#566b72` | `#899e9a` | 三级文字、注释和字形边框 |
+| `--ink-4` | `#7f9296` | `#668087` | 行号、不可达和弱化内容 |
+| `--rule` | `#1d343d` | `#d6e5e1` | 主要分隔线 |
+| `--rule-soft` | `#b9c8c4` | `#29424a` | 面板、控件和节点边框 |
+| `--rule-faint` | `#dce6e2` | `#172a32` | 行分隔与坐标网格 |
+| `--accent` / `--route-main` | `#b66a00` | `#f2b84b` | 当前路径、选中节点和焦点 |
+| `--route-branch` | `#147c98` | `#49afc7` | 普通关联线路 |
+| `--route-return` | `#b8443e` | `#e06a63` | 逆向边与循环线路 |
+| `--route-muted` | `#7f9296` | `#668087` | 不可达、终止和弱化线路 |
+| `--route-grid` | `#dce6e2` | `#183039` | 画布坐标网格 |
+| `--route-band` | `#eaf0ec` | `#102129` | 章节层带和选中站点底色 |
+| `--accent-ink` | `#804900` | `#ffd278` | 强调色文字 |
+| `--accent-soft` | `#f5e8c9` | `#3a2c13` | 当前代码行和强调背景 |
+| `--accent-line` | `#cf9b43` | `#8a6426` | 强调边框与下划线 |
 | `--amber` | `#8a5a0b` | `#d9a94a` | "No test reaches this within 3 caller hops" badge only |
 | `--amber-soft` | `#f3e9d2` | `#2e2716` | that badge's fill |
 
@@ -65,14 +72,10 @@ media/`[data-theme]` block. `body { background: var(--paper); color: var(--ink) 
   name on its own line weight 600; **call-site link** = `--accent`, underline `--accent-line`, offset 3px, hover/hot fill
   `--accent-soft`; uncertain link = `--ink-2`, dotted underline `--ink-4`; link to a symbol outside the index = `--ink-2`,
   underline `--rule-soft`, not clickable.
-  - *As built (CG-43) — comments are `--code-comment`, not `--ink-3`.* `--ink-3` measures 3.46:1 on `--paper` and 3.00:1 on
-    the hot-line tint `--accent-soft`, both under the 4.5:1 that 12.5px body text needs. `--code-comment` is the smallest
-    step along the same warm-grey ramp that clears 4.5:1 on every background a code line can have (`#6a675d` light —
-    paper 5.23, paper-2 4.92, accent-soft 4.53; `#8e8b81` dark — 5.36 / 5.10 / 4.51) while staying quieter than the
-    `--ink-2` strings and numbers use, so the recession order above is unchanged. Everything else in this list passes as
-    specified: ink 16.9/16.2, ink-2 7.03/8.89, accent 9.25/6.91 (8.02/5.80 on `--accent-soft`).
-  - *Line numbers remain `--ink-4` (1.99:1 light, 2.69:1 dark) — a known contrast gap, left as specified rather than
-    changed inside a rendering task. Worth a design call before phase 2.*
+  - `--code-comment` 与 `--ink-3` 使用同一可读色阶。亮色下在 `--paper`、`--paper-2`、`--accent-soft`
+    上的对比度分别为 5.15、4.85、4.62；暗色下分别为 6.53、5.95、4.79，均满足小字号正文的 4.5:1。
+  - 主要正文 `--ink`、次级正文 `--ink-2` 和强调文字 `--accent-ink` 在各自页面与强调背景上均高于 4.5:1。
+    `--ink-4` 只用于行号、弱化节点与非正文图形。
 
 ### 2.3 Kind glyphs
 
@@ -84,8 +87,8 @@ Container/type kinds get a `--press` fill.
 ## 3. Layout and components
 
 ### 3.1 App shell
-- Grid rows: **top bar 48px** / **trail bar 34px** / main. Top bar: brand (10px hollow square mark + "CodeGraph" 600 14px +
-  "ui" in `--ink-3`), view tabs (`Map · Symbol · Flow`, 5px 10px padding, active = 2px `--ink` bottom border), search input
+- Grid rows: **top bar 48px** / **trail bar 34px** / main. Top bar: brand (12px route station mark + "CodeGraph" 600 14px +
+  "ui" in `--ink-3`), view tabs (`Map · Symbol · Flow`, 5px 10px padding, active = 2px `--route-main` bottom border), search input
   (30px tall, `--paper-2` fill, `--rule-soft` border → `--ink` on focus, max-width 720px), project stats in `--ink-2` 12px.
   Bottom rule of the top bar is `--rule` (1px); the trail bar's is `--rule-soft`.
 - Focus ring everywhere: `outline: 2px solid var(--accent); outline-offset: 1px`. `prefers-reduced-motion` disables transitions.
@@ -180,11 +183,12 @@ drawn (hovered symbol, else the symbol the scroll position is inside) and the he
 total. Clicking an arc scrolls to the callee's definition and marks it. Data: `GET /api/filecode/<path>`.
 
 ### 3.5 Flow strip (`#/flow/<key>`)
-Header: "Flow" + a `<select>` of flows (`--paper-2`, `--rule-soft` border, 12.5px sans) + a 78ch note.
-Cards **380px** wide, `--rule-soft` border (`--ink` on hover, `--accent` when current), header grid `16px | 1fr` padding `10px 12px 6px`
+Header: "Flow" + a `<select>` of flows (`--paper-2`, `--route-branch` border, 12.5px sans) + a 78ch note.
+Cards **380px** wide, `--rule-soft` border with a `--route-branch` status rail (`--route-main` double outline when current), header grid `16px | 1fr` padding `10px 12px 6px`
 (name 600 13px mono, `file:line` 11px `--ink-3`), separator `--rule-faint`, source window `12px/19px` mono with line numbers
 (grid `40px | 1fr | 6px`), the call line tinted `--accent-soft` and the calling identifier as an accent link; ±3 lines around the call.
-Links between cards: **86px** wide; a 1px `--ink-3` line with a filled arrowhead (polygon `76,3 84,7 76,11` in a 86×14 box);
+Links between cards: **86px** wide; a 1.5px `--route-main` line with a filled arrowhead; alternate paths use `--route-branch`
+at reduced opacity, and a terminal link uses `--route-muted` (polygon `76,3 84,7 76,11` in a 86×14 box);
 label 11px mono `--ink-3` centred (`calls`, `line 2029`; `via callback · registered at file:line`); uncertain dasharray `2 3`;
 heuristic dasharray `5 3`. End cap: **240px**, dashed `--rule-soft` border, 12px text — "Where the graph stops" + the boundary
 (form, key, line) + uncertain continuations. In the real build the strip is a Svelte Flow canvas laid out left→right with the
@@ -205,16 +209,18 @@ with — so the strip and the MCP answer cannot disagree.
 
 ### 3.6 Map (`#/map`)
 Grid: canvas `minmax(600px,1fr)` | side panel **320px** (`--rule-soft` left border, 14px 16px padding).
-Nodes: rect `width = max(110, label.length × 7.3 + 28)`, **height 40**, `--paper` fill, 1px `--ink` stroke (2px + `--press` fill
-when hovered/selected; `--ink-4` when dimmed; test modules dashed `4 3` in `--ink-3`), label 13px mono at (10,17), count
+Nodes: rect `width = max(110, label.length × 7.3 + 28)`, **height 40**, `--paper` fill, 1px `--rule-soft` stroke,
+`--route-branch` left status rail and station ring (`--route-main` double outline when hovered/selected; `--route-muted` when dimmed;
+test modules dashed `4 3` in `--ink-3`), label 13px mono at (10,17), count
 "N symbols · M files" 11px `--ink-3` at (10,32). Layers: vertical gap **74px**, horizontal gap **34px**, padding 44px; entry points at the
 top ("entry points" label), foundations at the bottom ("foundations — depend on nothing below"); faint layer lines `--rule-faint`.
 Layout: aggregate edges by module; break 2-cycles keeping the heavier direction; longest-path layering (a module sits one layer
 above everything it depends on); barycenter ordering, 3 sweeps; single-node layers centred; ports spread along each box
 (`x = left + width × (i+1)/(n+1)` over the node's sorted out/in edges) so bundles fan. Edges: cubic `M x0,y0 C x0,my x1,my x1,y1`
-(`my` = midpoint), `stroke-width = min(6, 1 + log2(count) × 0.7)`, `--ink` at opacity 0.28 (hot 0.95, dimmed 0.06); a 12px transparent
+(`my` = midpoint), `stroke-width = min(6, 1 + log2(count) × 0.7)`, `--route-branch` at opacity 0.48
+(`--route-main` 0.95 when hot, dimmed 0.06); a 12px transparent
 hit path per edge; edges with count < 4 (< 6 when tests included) hidden until a touching module is selected; cycle back-edges only when
-selected, `--accent` opacity 0.6, dasharray `4 3`. Tooltip: `--paper`, 1px `--ink` border, 8px 10px, 12px: "src/a → src/b", "N edges",
+selected, `--route-return` opacity 0.82, dasharray `4 3`. Tooltip: `--paper-2`, 1px `--route-main` border, 8px 10px, 12px: "src/a → src/b", "N edges",
 by kind, top 4 symbol pairs. Side panel: title, 2-sentence explanation, hidden-edge note, "Include tests, scripts, kernel & site" checkbox,
 "Mutual dependencies" fold, selected module's dependencies/dependents with counts and its files. Fit: SVG width 100%,
 `viewBox` to content, `height: max(100%, 0.9 × content)` so labels never scale below ~0.9. In the real build this is a Svelte Flow
@@ -428,11 +434,11 @@ bottom → top; up: **top → bottom**; level: **top → top**, an arch whose co
 of one box, one direction), ranked by reach, farthest first, measured towards the hub's row; a line spanning several rows keeps
 its track in the gap beside its fan; level arches rise `gap × (0.66 − 0.26 × k/(n−1))`. Hover: the curve nearest the pointer,
 sampled at 24 points, within **10** screen px; no hit paths. Zoom **0.2–3**.
-Nodes as §3.6, sized for the screen's path (13px mono) over its component (11px sans); entry mark `●` in `--accent`;
-origins dashed `--ink-3`; unreached `--ink-4` stroke. Edges: the §3.6 cubic, `stroke-width = min(3, §3.6 width)`,
-`--ink` 0.32 (hot 0.95; soft 0.38 while another of the selected screen's lines is in focus; focus 1.0; dimmed 0.06);
-synthesized dasharray `5 3`; back `--accent` 0.6 dashed `4 3` (hot 0.85). Pills, on the selected screen's edges and the
-hovered one only: 10.5px mono on `--paper`, 1px `--rule` border (hot `--ink-3`; focus `--ink` + 0 2px 8px shadow), **17px**
+Nodes as §3.6, sized for the screen's path (13px mono) over its component (11px sans); entry station in `--route-main`;
+origins dashed `--ink-3`; unreached dashed `--route-muted`. Edges: the §3.6 cubic, `stroke-width = min(3, §3.6 width)`,
+`--route-branch` 0.52 (`--route-main` 0.95 when hot; soft 0.38; focus 1.0; dimmed 0.06);
+synthesized dasharray `5 3`; back `--route-return` 0.82 dashed `4 3` (hot 0.85). Pills, on the selected screen's edges and the
+hovered one only: 10.5px mono on `--paper-2`, 1px `--route-branch` border (focus `--route-main` + left status rail), **17px**
 tall, width `chars × 6.3 + 12`; text = the innermost top-level `&&` clause of the condition, ≤ **36** chars, `…` prefix
 when outer guards precede it, `→` / `←` prefix for leaving / arriving at the selected screen, or "N ways · M conditional"
 for a pair with several. Placement: at the FAR end of the line; first lane centred **13px** outside the far box, lanes
@@ -650,7 +656,7 @@ another site's arguments counting before that site, so `generateToken(…)` in `
 of the `200` it is part of; the layout (`map-model.ts` `order`) takes that as the row's initial order and its sweeps move a box
 only to sit under its parents. A link whose first hop is written inside another call's arguments says so (`WireStepLink.within`,
 `inside res.json(…)` in the panel and the tooltip) — the nesting is stated, never drawn as an edge out of an effect. Boxes:
-the §3.12 screen box for a screen or a handler; **bridge / event** add a 3px `--accent` left rule (the language
+the §3.12 screen box for a screen or a handler; **bridge / event** add a 3px `--route-main` left rule (the language
 changes under the code) and lead with `⇢` / `⇠ <event name>`; **store** sits on `--paper-2`; **effect** is dashed
 `--ink-3` (a place the graph cannot follow into), labelled by the API (`client.post`) over `category · caller`. Edges,
 pills, tooltip and the panel's hover contract are §3.12's verbatim; the panel adds *Start here →* (re-anchor) on any
@@ -839,7 +845,7 @@ Sentence case; controls say what happens ("Read as flow", "Clear"); counts alway
 ## Appendix — prototype stylesheet (verbatim; measurements above are derived from it)
 
 ```css
-/* ---------- tokens: paper/ink editorial, one oxblood accent ---------- */
+/* ---------- historical tokens: deprecated colours, geometry reference only ---------- */
 :root {
   --paper: #f7f6f2; --paper-2: #f1efe8; --press: #e8e6dd; --press-2: #dedbd0;
   --ink: #16150f; --ink-2: #56544a; --ink-3: #87847a; --ink-4: #b4b1a5;

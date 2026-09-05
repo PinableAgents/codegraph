@@ -126,20 +126,45 @@
 
 <style>
   .card {
+    position: relative;
     display: flex;
     flex-direction: column;
     overflow: hidden;
     background: var(--paper);
     border: 1px solid var(--rule-soft);
+    box-shadow: inset 3px 0 0 var(--route-branch);
     text-align: left;
+    transition: border-color 150ms ease, box-shadow 150ms ease, opacity 150ms ease;
+  }
+
+  .card::before {
+    content: '';
+    position: absolute;
+    left: -1px;
+    top: 50%;
+    z-index: 2;
+    width: 8px;
+    height: 8px;
+    border: 2px solid var(--route-branch);
+    border-radius: 50% !important;
+    background: var(--paper);
+    transform: translateY(-50%);
+    transition: border-color 150ms ease, background 150ms ease;
   }
 
   .card:hover {
-    border-color: var(--ink);
+    border-color: var(--route-main);
+  }
+
+  .card:hover::before,
+  .card.cur::before {
+    border-color: var(--route-main);
+    background: var(--route-main);
   }
 
   .card.cur {
-    border-color: var(--accent);
+    border-color: var(--route-main);
+    box-shadow: inset 3px 0 0 var(--route-main), 0 0 0 1px var(--route-main);
   }
 
   .card.dim {
@@ -159,7 +184,7 @@
   }
 
   .head:hover .nm {
-    color: var(--accent);
+    color: var(--accent-ink);
   }
 
   .nm {

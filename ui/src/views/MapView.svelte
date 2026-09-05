@@ -306,13 +306,17 @@
   .mapstage {
     position: relative;
     overflow: hidden;
-    background: var(--paper);
+    background-color: var(--paper);
+    background-image:
+      linear-gradient(var(--route-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--route-grid) 1px, transparent 1px);
+    background-size: 24px 24px;
   }
   /* Svelte Flow paints its own surface and its own controls; both are
      re-tokenised so the canvas belongs to the paper/ink system rather than
      arriving with the library's blue-grey defaults. */
   .mapstage :global(.svelte-flow) {
-    background: var(--paper);
+    background-color: transparent;
   }
   .mapstage :global(.svelte-flow__handle) {
     opacity: 0;
@@ -324,16 +328,16 @@
     pointer-events: none;
   }
   .mapstage :global(.svelte-flow__controls-button) {
-    background: var(--paper);
+    background: var(--paper-2);
     border: 0;
     border-bottom: 1px solid var(--rule-soft);
     border-radius: 0;
     box-shadow: none;
-    fill: var(--ink-2);
+    fill: var(--route-branch);
   }
   .mapstage :global(.svelte-flow__controls) {
     box-shadow: none;
-    border: 1px solid var(--rule-soft);
+    border: 1px solid var(--route-branch);
   }
   .mapstage :global(.svelte-flow__node) {
     cursor: default;
@@ -344,7 +348,8 @@
     top: 0;
     left: 0;
     height: 1px;
-    background: var(--rule-faint);
+    background: var(--route-grid);
+    box-shadow: 0 12px 0 color-mix(in srgb, var(--route-band) 65%, transparent);
     pointer-events: none;
   }
   .layerlbl {
@@ -352,7 +357,10 @@
     top: 0;
     left: 0;
     font: 12px var(--sans);
-    color: var(--ink-3);
+    color: var(--ink-2);
+    padding: 2px 7px;
+    border-left: 3px solid var(--route-branch);
+    background: var(--paper-2);
     white-space: nowrap;
     pointer-events: none;
   }
@@ -381,7 +389,8 @@
     z-index: 6;
     max-width: 320px;
     background: var(--paper);
-    border: 1px solid var(--ink);
+    border: 1px solid var(--route-main);
+    box-shadow: inset 3px 0 0 var(--route-main);
     padding: 8px 10px;
     font-size: 12px;
     color: var(--ink-2);

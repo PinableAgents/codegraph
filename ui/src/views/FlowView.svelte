@@ -365,21 +365,24 @@
     display: flex;
     align-items: center;
     padding: 12px 18px;
-    border-bottom: 1px solid var(--rule-soft);
+    border-bottom: 1px solid var(--route-branch);
     gap: 12px;
+    background: var(--paper-2);
   }
 
   .fhead h1 {
     margin: 0;
     font-size: 16px;
     font-weight: 600;
+    padding-left: 8px;
+    border-left: 3px solid var(--route-main);
   }
 
   .fhead select {
     padding: 3px 6px;
     background: var(--paper-2);
     color: var(--ink);
-    border: 1px solid var(--rule-soft);
+    border: 1px solid var(--route-branch);
     border-radius: 0;
     font: 12.5px var(--sans);
   }
@@ -394,13 +397,17 @@
   .fstage {
     position: relative;
     overflow: hidden;
-    background: var(--paper);
+    background-color: var(--paper);
+    background-image:
+      linear-gradient(var(--route-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--route-grid) 1px, transparent 1px);
+    background-size: 24px 24px;
   }
 
   /* Svelte Flow paints its own surface and controls; both are re-tokenised so
      the canvas belongs to the paper/ink system. Same treatment as the Map. */
   .fstage :global(.svelte-flow) {
-    background: var(--paper);
+    background-color: transparent;
   }
   .fstage :global(.svelte-flow__handle) {
     width: 1px;
@@ -415,16 +422,16 @@
     cursor: default;
   }
   .fstage :global(.svelte-flow__controls) {
-    border: 1px solid var(--rule-soft);
+    border: 1px solid var(--route-branch);
     box-shadow: none;
   }
   .fstage :global(.svelte-flow__controls-button) {
-    background: var(--paper);
+    background: var(--paper-2);
     border: 0;
     border-bottom: 1px solid var(--rule-soft);
     border-radius: 0;
     box-shadow: none;
-    fill: var(--ink-2);
+    fill: var(--route-branch);
   }
 
   .state {

@@ -86,30 +86,55 @@
 
 <style>
   .snode {
+    position: relative;
     display: flex;
     flex-direction: column;
     justify-content: center;
     gap: 1px;
     box-sizing: border-box;
     padding: 0 9px;
-    border: 1px solid var(--ink);
+    border: 1px solid var(--rule-soft);
     border-radius: 0;
     background: var(--paper);
     text-align: left;
     cursor: pointer;
     font: inherit;
     color: var(--ink);
-    transition: background 90ms linear;
+    box-shadow: inset 3px 0 0 var(--route-branch);
+    transition: background 150ms ease, border-color 150ms ease, box-shadow 150ms ease, color 150ms ease;
+  }
+  .snode::before {
+    content: '';
+    position: absolute;
+    left: -5px;
+    top: 50%;
+    width: 8px;
+    height: 8px;
+    border: 2px solid var(--route-branch);
+    border-radius: 50% !important;
+    background: var(--paper);
+    transform: translateY(-50%);
+    transition: border-color 150ms ease, background 150ms ease;
   }
   .snode:hover,
   .snode.sel {
-    border-width: 2px;
-    padding: 0 8px;
-    background: var(--press);
+    border-color: var(--route-main);
+    box-shadow: inset 3px 0 0 var(--route-main), 0 0 0 1px var(--route-main);
+    background: var(--route-band);
+  }
+  .snode:hover::before,
+  .snode.sel::before,
+  .snode.entry::before {
+    border-color: var(--route-main);
+    background: var(--route-main);
   }
   .snode.dimmed {
-    border-color: var(--ink-4);
+    border-color: var(--rule-faint);
     color: var(--ink-4);
+    box-shadow: inset 3px 0 0 var(--route-muted);
+  }
+  .snode.dimmed::before {
+    border-color: var(--route-muted);
   }
   .snode.dimmed .sub {
     color: var(--ink-4);
@@ -117,10 +142,31 @@
   .snode.origin {
     border-style: dashed;
     border-color: var(--ink-3);
+    box-shadow: inset 3px 0 0 var(--route-muted);
   }
   .snode.unreached {
-    border-color: var(--ink-4);
+    border-style: dashed;
+    border-color: var(--route-muted);
     color: var(--ink-2);
+    box-shadow: none;
+  }
+  .snode.unreached::before {
+    border-color: var(--route-muted);
+    border-style: dashed;
+  }
+  .snode.origin:hover,
+  .snode.origin.sel,
+  .snode.unreached:hover,
+  .snode.unreached.sel {
+    border-color: var(--route-main);
+    box-shadow: inset 3px 0 0 var(--route-main), 0 0 0 1px var(--route-main);
+  }
+  .snode.origin:hover::before,
+  .snode.origin.sel::before,
+  .snode.unreached:hover::before,
+  .snode.unreached.sel::before {
+    border-color: var(--route-main);
+    background: var(--route-main);
   }
   .snode:focus-visible {
     outline: 2px solid var(--accent);
@@ -134,7 +180,7 @@
     text-overflow: ellipsis;
   }
   .mark {
-    color: var(--accent);
+    color: var(--route-main);
     margin-right: 5px;
     font-size: 9px;
     vertical-align: 1px;
