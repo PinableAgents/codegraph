@@ -16,6 +16,7 @@
    */
   import PalettePanel from './PalettePanel.svelte';
   import { palette } from '../lib/palette.svelte';
+  import { localize } from '../lib/i18n.svelte';
   import type { PaletteItem } from '../lib/search-model';
   import { fileHref, flowHref, navigate } from '../lib/navigation';
   import { openEntryTarget, walkTo } from '../lib/walk';
@@ -131,7 +132,7 @@
 
 <svelte:window {onpointerdown} />
 
-<div class="search" role="search" bind:this={box}>
+<div class="search" role="search" bind:this={box} use:localize>
   <input
     bind:this={input}
     bind:value={palette.query}

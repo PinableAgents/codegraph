@@ -30,6 +30,7 @@
   import { project } from './lib/project.svelte';
   import { live } from './lib/live.svelte';
   import { toast } from './lib/toast.svelte';
+  import { i18n, localize } from './lib/i18n.svelte';
 
   // One `/api/stats` for the whole app: the top bar's counts and the Symbol
   // view's blast-radius denominator come out of the same payload.
@@ -61,7 +62,7 @@
       // moved, so their decay lines are stale the moment it does — a hop that
       // was "gone" a minute ago may be back, and vice versa.
       void trails.reload();
-      toast.show('Index updated · reloaded');
+      toast.show(i18n.t('toast.indexUpdated'));
     });
   });
 
@@ -156,7 +157,7 @@
 
 <TopBar bind:this={topbar} project={project.name} stats={project.summary} showScreens={hasScreens} />
 <TrailBar />
-<main>
+<main use:localize>
   {#if route.view === 'symbol'}
     <SymbolView id={route.id} line={route.line} />
   {:else if route.view === 'file' && route.source}

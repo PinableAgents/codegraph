@@ -30,7 +30,7 @@ export default defineWorkspace([
     test: {
       name: 'engine',
       include: ['__tests__/**/*.test.ts'],
-      exclude: ['**/node_modules/**', '**/dist/**', '__tests__/ui-package.test.ts'],
+      exclude: ['**/node_modules/**', '**/dist/**', '__tests__/ui-package.test.ts', '__tests__/ui-i18n.test.ts'],
     },
   },
   {
@@ -48,7 +48,7 @@ export default defineWorkspace([
     test: {
       name: 'ui',
       globals: true,
-      include: ['__tests__/ui-package.test.ts'],
+      include: ['__tests__/ui-package.test.ts', '__tests__/ui-i18n.test.ts'],
       environment: 'jsdom',
       server: {
         deps: {

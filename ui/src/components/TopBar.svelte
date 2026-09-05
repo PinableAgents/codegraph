@@ -3,6 +3,7 @@
   import { trail } from '../lib/trail.svelte';
   import SearchPalette from './SearchPalette.svelte';
   import { live } from '../lib/live.svelte';
+  import { i18n } from '../lib/i18n.svelte';
 
   interface Props {
     /** Indexed project name, e.g. "codegraph/". Null until stats load. */
@@ -44,15 +45,14 @@
   let liveNote = $derived.by(() => {
     if (live.degraded !== null) {
       return {
-        text: 'Live updates off',
-        title: `${live.degraded} This page no longer refreshes itself — reload it after a sync.`,
+        text: i18n.t('live.degraded'),
+        title: i18n.t('live.degradedTitle', { reason: live.degraded }),
       };
     }
     if (live.stopped) {
       return {
-        text: 'Not live',
-        title:
-          'Lost the connection to codegraph ui and stopped retrying. Focus this tab to try again, or reload the page.',
+        text: i18n.t('live.stopped'),
+        title: i18n.t('live.stoppedTitle'),
       };
     }
     return null;
@@ -60,25 +60,30 @@
 </script>
 
 <header class="topbar">
-  <a class="brand" href="#/" aria-label="CodeGraph home">
+  <a class="brand" href="#/" aria-label={i18n.t('a11y.home')}>
     <span class="brand-mark" aria-hidden="true"></span>
     <span class="brand-name">CodeGraph</span>
     <span class="brand-sub">ui</span>
   </a>
 
-  <nav class="views" aria-label="Views">
-    {#if showScreens}<a href={screensHref()} class:active={view === 'screens' || view === 'home'}>Screens</a>{/if}
-    <a href={stepsHref()} class:active={view === 'steps'}>Steps</a>
-    <a href={entryHref()} class:active={view === 'entry'}>Entry points</a>
-    <a href={mapHref()} class:active={view === 'map'}>Map</a>
-    <a href={symbolTabHref} class:active={view === 'symbol' || (view === 'home' && !showScreens)}>Symbol</a>
-    <a href={flowHref()} class:active={view === 'flow'}>Flow</a>
-    <a href={deadHref()} class:active={view === 'dead'}>Dead code</a>
+  <nav class="views" aria-label={i18n.t('a11y.views')}>
+    {#if showScreens}<a href={screensHref()} class:active={view === 'screens' || view === 'home'}>{i18n.t('nav.screens')}</a>{/if}
+    <a href={stepsHref()} class:active={view === 'steps'}>{i18n.t('nav.steps')}</a>
+    <a href={entryHref()} class:active={view === 'entry'}>{i18n.t('nav.entry')}</a>
+    <a href={mapHref()} class:active={view === 'map'}>{i18n.t('nav.map')}</a>
+    <a href={symbolTabHref} class:active={view === 'symbol' || (view === 'home' && !showScreens)}>{i18n.t('nav.symbol')}</a>
+    <a href={flowHref()} class:active={view === 'flow'}>{i18n.t('nav.flow')}</a>
+    <a href={deadHref()} class:active={view === 'dead'}>{i18n.t('nav.dead')}</a>
   </nav>
 
   <SearchPalette bind:this={search} />
 
-  <div class="project" title="Indexed project">
+  <div class="language" role="group" aria-label={i18n.t('a11y.language')}>
+    <button type="button" class:active={i18n.locale === 'zh-CN'} aria-pressed={i18n.locale === 'zh-CN'} onclick={() => i18n.setLocale('zh-CN')}>{i18n.t('language.chinese')}</button>
+    <button type="button" class:active={i18n.locale === 'en'} aria-pressed={i18n.locale === 'en'} onclick={() => i18n.setLocale('en')}>{i18n.t('language.english')}</button>
+  </div>
+
+  <div class="project" title={i18n.t('a11y.indexedProject')}>
     {#if liveNote}<span class="offline" title={liveNote.title}>{liveNote.text}</span>{/if}
     {#if project}<span class="mono">{project}</span>{/if}
     {#if stats}<span class="dim">{stats}</span>{/if}
@@ -88,7 +93,7 @@
 <style>
   .topbar {
     display: grid;
-    grid-template-columns: auto auto 1fr auto;
+    grid-template-columns: auto auto 1fr auto auto;
     align-items: center;
     gap: 22px;
     padding: 0 18px;
@@ -148,6 +153,25 @@
     color: var(--ink-2);
     font-size: 12px;
     white-space: nowrap;
+  }
+
+  .language {
+    display: flex;
+    gap: 2px;
+  }
+
+  .language button {
+    padding: 3px 6px;
+    border: 1px solid var(--rule-soft);
+    background: transparent;
+    color: var(--ink-2);
+    font: inherit;
+    font-size: 11px;
+  }
+
+  .language button.active {
+    border-color: var(--ink-2);
+    color: var(--ink);
   }
 
   .offline {

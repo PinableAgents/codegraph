@@ -12,6 +12,7 @@
   import { trails } from '../lib/trails.svelte';
   import { replacedTrail, trailNameProblem } from '../lib/trails-model';
   import { toast } from '../lib/toast.svelte';
+  import { localize } from '../lib/i18n.svelte';
 
   /** Matches `MAX_TRAIL_NAME` in `src/ui-server/api/trail-store.ts`. */
   const MAX_NAME = 120;
@@ -106,7 +107,7 @@
 <!-- One root element, always: the save form is a second row inside it rather
      than a sibling, so a host's layout still sees the trail bar as one box
      whose height grows only while the form is open. -->
-<div class="trailwrap">
+<div class="trailwrap" use:localize>
 <div class="trailbar">
   <span class="label">Trail</span>
 
