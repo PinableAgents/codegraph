@@ -76,4 +76,12 @@ describe('Web UI i18n', () => {
       '13 个符号 · 46 条边 · 已索引 593 个文件'
     );
   });
+
+  it('提供搜索与步骤空状态的中文文案', async () => {
+    const { i18n } = await import('../ui/src/lib/i18n.svelte');
+
+    expect(i18n.t('search.placeholder')).toBe('搜索符号或文件，或询问“execute 如何到达 getFile”——按 / 聚焦');
+    expect(i18n.t('steps.pickScreen')).toContain('选择一个界面');
+    expect(i18n.t('steps.noTargets')).toContain('此图谱中没有界面或端点');
+  });
 });

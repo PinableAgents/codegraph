@@ -33,6 +33,7 @@
     type WireStepLink,
     type WireStepsPayload,
   } from '../lib/api';
+  import { i18n } from '../lib/i18n.svelte';
   import { live } from '../lib/live.svelte';
   import { fileHref, flowHref, navigate, stepsHref, symbolHref } from '../lib/navigation';
   import type { MapEdgeLayout } from '../lib/map-model';
@@ -493,32 +494,26 @@
   <div class="stage" bind:this={stage} role="presentation" onmousemove={onStageMove} onmouseleave={() => (hovered = null)}>
     {#if !supported}
       <div class="state">
-        <h2>This viewer cannot draw steps</h2>
-        <p>The host it runs in has not wired the steps question. The Screens and Flow views still work.</p>
+        <h2>{i18n.t('steps.cannotDraw')}</h2>
+        <p>{i18n.t('steps.cannotDrawDetail')}</p>
       </div>
     {:else if !asked}
       <div class="state chooser">
-        <h2>What happens from where?</h2>
+        <h2>{i18n.t('steps.fromWhere')}</h2>
         {#if chooser === 'routes'}
           <p>
-            Pick an endpoint and this view draws everything it sets in motion — its handler and what runs
-            before it, the calls into the database, a queue, another service, and every response it can
-            send — one box per step, an arrow for every way one leads to the next, and on each arrow the
-            condition under which it happens. Or search a symbol and choose <i>What happens from here</i>.
+            {i18n.t('steps.pickEndpoint')} <i>{i18n.t('steps.whatHappensHere')}</i>.
           </p>
         {:else}
           <p>
-            Pick a screen and this view draws everything it sets in motion — its handlers, the calls that
-            cross into native code, the events that come back, the state it writes, the requests that leave
-            the app — one box per step, an arrow for every way one leads to the next, and on each arrow the
-            condition under which it happens. Or search a symbol and choose <i>What happens from here</i>.
+            {i18n.t('steps.pickScreen')} <i>{i18n.t('steps.whatHappensHere')}</i>.
           </p>
         {/if}
         {#if chooser === null}
-          <p class="dim">Reading {screens === null ? 'screens' : 'endpoints'}…</p>
+          <p class="dim">{screens === null ? i18n.t('steps.readingScreens') : i18n.t('steps.readingEndpoints')}</p>
         {:else if chooser === 'none'}
           <p class="dim">
-            No screens or endpoints in this graph. Open a symbol from the search box and follow <i>What happens from here</i>,
+            {i18n.t('steps.noTargets')} <i>{i18n.t('steps.whatHappensHere')}</i>,
             or link here directly with <span class="mono">#/steps?symbol=&lt;name&gt;</span>.
           </p>
         {:else if chooser === 'screens' && screens !== null}

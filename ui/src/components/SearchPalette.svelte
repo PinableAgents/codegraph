@@ -16,7 +16,7 @@
    */
   import PalettePanel from './PalettePanel.svelte';
   import { palette } from '../lib/palette.svelte';
-  import { localize } from '../lib/i18n.svelte';
+  import { i18n, localize } from '../lib/i18n.svelte';
   import type { PaletteItem } from '../lib/search-model';
   import { fileHref, flowHref, navigate } from '../lib/navigation';
   import { openEntryTarget, walkTo } from '../lib/walk';
@@ -30,8 +30,8 @@
   }
 
   let {
-    placeholder = 'Search a symbol or file, or ask “how does execute reach getFile” — press / to focus',
-    label = 'Search symbols and files',
+    placeholder = i18n.t('search.placeholder'),
+    label = i18n.t('search.label'),
     onpick,
   }: Props = $props();
 
