@@ -29,9 +29,8 @@
     note?: string;
     onSelect: (id: string) => void;
     /** Re-anchor the picture on this step — a double-click; absent for a step with no symbol. */
-    onStart?: (id: string) => void;
   }
-  let { info, project, selected, dimmed, size = null, note = '', onSelect, onStart }: Props = $props();
+  let { info, project, selected, dimmed, size = null, note = '', onSelect }: Props = $props();
   const step = $derived(info.step);
 
   const cutNote = $derived.by(() => {
@@ -62,15 +61,8 @@
   class:rail={size === null}
   style={size === null ? undefined : `width:${size.width}px;height:${size.height}px`}
   onclick={() => onSelect(info.id)}
-  ondblclickcapture={(e) => {
-    // The flow canvas zooms on a double-click that reaches its pane; a
-    // double-click on a box is a navigation, not a zoom — stop it here,
-    // at the target, before it bubbles. The pane's own double-click keeps zooming.
-    e.stopPropagation();
-    onStart?.(info.id);
-  }}
   aria-pressed={selected}
-  title={`${info.label} — ${step.anchor ? 'where this picture starts; ' : ''}${kindWord(step.kind, project, step)}. ${info.sub}.${note ? ` ${note}` : ''}${cutNote}${onStart && !step.anchor ? ' Double-click to start here.' : ''}`}
+  title={`${info.label} — ${step.anchor ? 'where this picture starts; ' : ''}${kindWord(step.kind, project, step)}. ${info.sub}.${note ? ` ${note}` : ''}${cutNote}`}
 >
   <span class="name"
     >{#if step.anchor}<span class="mark" aria-hidden="true">●</span>{/if}{info.label}{#if step.cut !== null}<span

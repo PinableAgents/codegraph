@@ -9,7 +9,7 @@ import { SqliteDatabase } from './sqlite-adapter';
 /**
  * Current schema version
  */
-export const CURRENT_SCHEMA_VERSION = 9;
+export const CURRENT_SCHEMA_VERSION = 10;
 
 /**
  * Migration definition
@@ -175,6 +175,15 @@ const migrations: Migration[] = [
       db.exec(
         'CREATE INDEX IF NOT EXISTS idx_files_generated ON files(path) WHERE generated = 1'
       );
+    },
+  },
+  {
+    version: 10,
+    description: '工作台关系和符号游标分页索引',
+    up(db) {
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_edges_source_id ON edges(source, id);
+CREATE INDEX IF NOT EXISTS idx_edges_target_id ON edges(target, id);
+CREATE INDEX IF NOT EXISTS idx_nodes_file_id ON nodes(file_path, id);`);
     },
   },
 ];

@@ -11,6 +11,11 @@
   can audit is a diagram that gets believed too much.
 -->
 <script lang="ts">
+  import { moduleTarget } from '../../lib/map-scope';
+  import DirectoryBrowser from '../graph/DirectoryBrowser.svelte';
+  import { getGraphAdapter } from '../../lib/adapter';
+  import { graphText } from '../../lib/graph-copy';
+  import VirtualList from '../graph/VirtualList.svelte';
   import ExportButtons from '../ExportButtons.svelte';
   import { fileHref } from '../../lib/navigation';
   import { plural } from '../../lib/symbol-model';
@@ -22,6 +27,10 @@
     layout: MapLayout;
     selected: string | null;
     includeTests: boolean;
+    detailsRequested?: boolean;
+    detailsLoading?: boolean;
+    detailsFailed?: boolean;
+    onLoadDetails?: () => void;
     files: string[];
     onToggleTests: (value: boolean) => void;
     onSelectRoot: (root: string) => void;
@@ -34,13 +43,15 @@
 
   let {
     payload,
+    detailsRequested = false,
+    detailsLoading = false,
+    detailsFailed = false,
+    onLoadDetails,
     layout,
     selected,
-    includeTests,
     files,
-    onToggleTests,
-    onSelectRoot,
     onSelect,
+    onSelectRoot,
     buildSvg,
     exportName,
   }: Props = $props();
@@ -49,6 +60,7 @@
     selected === null ? null : (layout.nodes.find((n) => n.id === selected) ?? null)
   );
   const selectedModule = $derived(selectedNode?.module ?? null);
+  const target = $derived(selectedModule ? moduleTarget(selectedModule) : null);
   /** Which of the listed files are tool-generated — the rows drawn in ink-4. */
   const generatedFiles = $derived(new Set(selectedModule?.generatedFiles ?? []));
 
@@ -75,37 +87,21 @@
 <aside class="mapside">
   <h2>Architecture map</h2>
   <p>
-    Derived from the graph, not drawn by hand: each module sits one layer above the modules it
-    depends on, so reading top to bottom follows the dependency direction. Line weight is how many
-    calls, imports and type references cross the link.
+    {graphText('自动布局按依赖分层，也可拖动节点整理位置。箭头从调用或依赖方指向目标；连线粗细表示跨模块调用、导入和类型引用数量。流向动画是静态关系示意，不是运行时数据追踪。', 'The automatic layout groups dependencies; drag nodes to arrange them. Arrows point from the caller or dependent to its target. Line weight counts calls, imports and type references. Flow animation illustrates static relationships, not runtime data tracing.')}
   </p>
 
   <!-- The map is the thing people paste into a README, so the way out sits
        directly under the sentence explaining what it is. -->
   <ExportButtons build={buildSvg} filename={exportName} />
 
-  <label class="field">
-    <span>Showing</span>
-    <select
-      value={payload.root}
-      onchange={(event) => onSelectRoot((event.currentTarget as HTMLSelectElement).value)}
-    >
-      {#each payload.roots as option (option.root)}
-        <option value={option.root}>{option.label} · {option.files} files</option>
-      {/each}
-    </select>
-  </label>
-
-  <label class="toggle">
-    <input
-      type="checkbox"
-      checked={includeTests}
-      onchange={(event) => onToggleTests((event.currentTarget as HTMLInputElement).checked)}
-    />
-    Include test modules
-  </label>
-
   <div class="notes">
+    {#if payload.detailsDeferred}
+      <p class="dim">{graphText('概览仅加载模块关系。调用点请在符号关系列表中查看；文件级循环需要显式加载。', 'The overview loads module relationships only. Inspect call sites in symbol relationships; load file-level cycles explicitly.')}</p>
+      {#if onLoadDetails}<button class="load-details" disabled={detailsLoading} onclick={onLoadDetails}>{detailsLoading && detailsRequested ? graphText('加载中…', 'Loading…') : graphText('加载文件级循环', 'Load file-level cycles')}</button>{/if}
+      {#if detailsRequested && !detailsLoading && !detailsFailed}<p class="dim">{graphText('该范围仍超过 400 个文件或 2000 条文件关系，请进一步缩小目录范围后加载。', 'This scope still exceeds 400 files or 2,000 file relationships. Narrow the directory before loading cycles.')}</p>{/if}
+    {:else if detailsRequested && payload.cycles.total === 0 && !payload.cycles.truncated}
+      <p class="dim">{graphText('当前文件范围已检查，未发现文件级循环。', 'The current file scope was checked; no file-level cycles were found.')}</p>
+    {/if}
     {#if thinCount > 0}
       <p class="dim">
         {plural(thinCount, 'link')} carrying fewer than {layout.minWeight} references
@@ -166,12 +162,12 @@
         </span>
       </summary>
       {#each layout.moduleCycles.slice(0, 6) as cycle, i (i)}
-        <div class="cyc">{cycle.join(' → ')} → {cycle[0]}</div>
+        <div class="cyc"><button onclick={() => onSelect(cycle[0] ?? null)}>{cycle.join(' → ')} → {cycle[0]}</button></div>
       {/each}
     </details>
   {/if}
 
-  {#if payload.cycles.total > 0}
+  {#if payload.cycles.total > 0 && (payload.detailsDeferred === undefined || detailsRequested)}
     <details>
       <summary>
         Circular imports between files
@@ -225,16 +221,19 @@
       {@render linkList('depends on', dependencies, 'target')}
       {@render linkList('depended on by', dependents, 'source')}
 
-      <div class="pair label">files</div>
-      {#if files.length > 0}
-        {#each files as file (file)}
+      {#if target?.kind === 'file'}
+        <a class="filerow" href={fileHref(target.path)}>{target.path}</a>
+      {:else if target && getGraphAdapter().browse}
+        <DirectoryBrowser root={target.path} filesOnly={target.kind === 'root-files'} onOpen={onSelectRoot} />
+      {:else if files.length > 0}
+        <VirtualList items={files}>{#snippet row(file)}
           <a
             class="filerow"
             class:gen={generatedFiles.has(file)}
             href={fileHref(file)}
             title={generatedFiles.has(file) ? `${file} — tool-generated` : file}>{file}</a
           >
-        {/each}
+        {/snippet}</VirtualList>
       {:else}
         <div class="pair dim">no files in the index for this module</div>
       {/if}
@@ -252,18 +251,19 @@
 {#snippet linkList(label: string, links: WireMapLink[], side: 'source' | 'target')}
   <div class="pair label">{label}</div>
   {#if links.length > 0}
-    {#each links as link (link.source + link.target)}
+    <VirtualList items={links}>{#snippet row(link)}
       <div class="pair">
         <b>{side === 'target' ? link.target : link.source}</b>
         <span>{link.count}</span>
       </div>
-    {/each}
+    {/snippet}</VirtualList>
   {:else}
     <div class="pair dim">nothing</div>
   {/if}
 {/snippet}
 
 <style>
+  .load-details{min-height:36px;padding:4px 10px;border:1px solid var(--rule);background:var(--paper);color:var(--ink);font:14px var(--sans)}
   .mapside {
     border-left: 1px solid var(--route-branch);
     overflow: auto;
@@ -291,37 +291,6 @@
   .notes p {
     font-size: 11.5px;
     margin-bottom: 8px;
-  }
-  .field {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    font-size: 12.5px;
-    color: var(--ink-2);
-    margin: 12px 0 8px;
-  }
-  .field select {
-    flex: 1 1 auto;
-    min-width: 0;
-    font: 12px var(--mono);
-    color: var(--ink);
-    background: var(--paper);
-    border: 1px solid var(--rule-soft);
-    border-radius: 0;
-    padding: 3px 4px;
-  }
-  .toggle {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    font-size: 12.5px;
-    color: var(--ink-2);
-    margin: 0 0 12px;
-    cursor: pointer;
-  }
-  .toggle input {
-    margin: 0;
-    accent-color: var(--ink);
   }
   details {
     margin: 4px 0 10px;

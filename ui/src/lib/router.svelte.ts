@@ -58,6 +58,7 @@ export type {
 } from './navigation';
 
 export type Route =
+  | { view: 'workspace' }
   | { view: 'home' }
   | { view: 'symbol'; id: string; line: number | null }
   | {
@@ -100,6 +101,7 @@ export type Route =
 export type ViewName = Route['view'];
 
 export interface RouterLocation {
+  projectId: string | null;
   route: Route;
   /** Query part of the hash (`?t=…&hl=…`), for consumers like the trail. */
   params: URLSearchParams;
@@ -131,9 +133,13 @@ export function parseHash(hash: string): RouterLocation {
   const segments = pathPart.split('/').filter(Boolean).map(decodeSegment);
   const line = parseLine(params);
 
+  const projectId = segments[0] === 'p' && segments.length >= 2 ? segments[1]! : null;
+  if (projectId !== null) segments.splice(0, 2);
   const [head, ...rest] = segments;
   let route: Route;
-  if (head === undefined) {
+  if (head === 'workspace' && projectId === null) {
+    route = { view: 'workspace' };
+  } else if (head === undefined) {
     route = { view: 'home' };
   } else if (head === 's' && rest.length > 0) {
     route = { view: 'symbol', id: rest.join('/'), line };
@@ -185,7 +191,7 @@ export function parseHash(hash: string): RouterLocation {
     route = { view: 'unknown', path: pathPart };
   }
 
-  return { route, params, raw };
+  return { route, params, raw, projectId };
 }
 
 /* ---------- the live route ---------- */

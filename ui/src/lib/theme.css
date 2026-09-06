@@ -18,36 +18,37 @@
 
 /* ---------- tokens: light / paper (the bare :root set) ---------- */
 :root {
-  --paper: #f3f6f2;
-  --paper-2: #eaf0eb;
-  --press: #dfe9e3;
-  --press-2: #cfddd6;
-  --ink: #122026;
-  --ink-2: #41555c;
-  --ink-3: #566b72;
-  --ink-4: #7f9296;
-  --rule: #1d343d;
-  --rule-soft: #b9c8c4;
-  --rule-faint: #dce6e2;
-  --accent: #b66a00;
-  --accent-ink: #804900;
-  --accent-soft: #f5e8c9;
-  --accent-line: #cf9b43;
+  --paper: #f7f8fa;
+  --paper-2: #eef1f5;
+  --press: #e3e8ef;
+  --press-2: #d2dbe6;
+  --ink: #202b3b;
+  --ink-2: #455369;
+  --ink-3: #58677c;
+  --ink-4: #8390a1;
+  --rule: #c5ceda;
+  --rule-soft: #d2d9e3;
+  --rule-faint: #e3e8ef;
+  --accent: #3867a8;
+  --accent-ink: #294f85;
+  --accent-wash: var(--accent-soft);
+  --accent-soft: #e5edf8;
+  --accent-line: #7196c8;
   --amber: #8a5a0b;
   --amber-soft: #f3e9d2;
 
   /* 颜色只补充关系语义：实线仍表示直接关系，虚线仍表示推断或回路，
      粗细仍表示权重，因此线路在无颜色环境下也可辨认。 */
-  --route-main: #b66a00;
+  --route-main: #3867a8;
   --route-branch: #147c98;
   --route-return: #b8443e;
-  --route-muted: #7f9296;
-  --route-grid: #dce6e2;
-  --route-band: #eaf0ec;
+  --route-muted: #8390a1;
+  --route-grid: #e3e8ef;
+  --route-band: #eef1f5;
 
   /* 注释沿用次级文字色；当前亮暗调色板在纸面、次级纸面和强调底色上
      均保持正文所需的 AA 对比度，同时仍弱于字符串和数字使用的 --ink-2。 */
-  --code-comment: #566b72;
+  --code-comment: #58677c;
 
   --sans: 'Archivo Variable', 'Archivo', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
   --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
@@ -56,7 +57,7 @@
 
   /* App-shell geometry, shared by the grid and by anything that has to
      offset itself under the bars (sticky rail headers, SVG overlays). */
-  --topbar-h: 48px;
+  --topbar-h: 64px;
   --trailbar-h: 34px;
 
   color-scheme: light dark;
@@ -68,24 +69,24 @@
    win over the OS preference. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --paper: #0b151b;
-    --paper-2: #111f26;
-    --press: #19303a;
-    --press-2: #24414b;
+    --paper: #141a23;
+    --paper-2: #1b2330;
+    --press: #243044;
+    --press-2: #30405a;
     --ink: #e8f1ee;
     --ink-2: #b3c3bf;
     --ink-3: #899e9a;
     --ink-4: #668087;
-    --rule: #d6e5e1;
+    --rule: #46556b;
     --rule-soft: #29424a;
     --rule-faint: #172a32;
-    --accent: #f2b84b;
-    --accent-ink: #ffd278;
-    --accent-soft: #3a2c13;
-    --accent-line: #8a6426;
+    --accent: #87ace2;
+    --accent-ink: #b0cbf0;
+    --accent-soft: #203149;
+    --accent-line: #5475a6;
     --amber: #d9a94a;
     --amber-soft: #2e2716;
-    --route-main: #f2b84b;
+    --route-main: #87ace2;
     --route-branch: #49afc7;
     --route-return: #e06a63;
     --route-muted: #668087;
@@ -102,24 +103,24 @@
    put a light reader inside a dark application, and the reverse. */
 :root[data-theme='dark'],
 [data-theme='dark'] {
-  --paper: #0b151b;
-  --paper-2: #111f26;
-  --press: #19303a;
-  --press-2: #24414b;
+  --paper: #141a23;
+  --paper-2: #1b2330;
+  --press: #243044;
+  --press-2: #30405a;
   --ink: #e8f1ee;
   --ink-2: #b3c3bf;
   --ink-3: #899e9a;
   --ink-4: #668087;
-  --rule: #d6e5e1;
+  --rule: #46556b;
   --rule-soft: #29424a;
   --rule-faint: #172a32;
-  --accent: #f2b84b;
-  --accent-ink: #ffd278;
-  --accent-soft: #3a2c13;
-  --accent-line: #8a6426;
+  --accent: #87ace2;
+  --accent-ink: #b0cbf0;
+  --accent-soft: #203149;
+  --accent-line: #5475a6;
   --amber: #d9a94a;
   --amber-soft: #2e2716;
-  --route-main: #f2b84b;
+  --route-main: #87ace2;
   --route-branch: #49afc7;
   --route-return: #e06a63;
   --route-muted: #668087;
@@ -133,30 +134,30 @@
    the OS is painting dark. `:root[data-theme='light']` needs no block — the
    media query above already excludes it. */
 [data-theme='light'] {
-  --paper: #f3f6f2;
-  --paper-2: #eaf0eb;
-  --press: #dfe9e3;
-  --press-2: #cfddd6;
-  --ink: #122026;
-  --ink-2: #41555c;
-  --ink-3: #566b72;
-  --ink-4: #7f9296;
-  --rule: #1d343d;
-  --rule-soft: #b9c8c4;
-  --rule-faint: #dce6e2;
-  --accent: #b66a00;
-  --accent-ink: #804900;
-  --accent-soft: #f5e8c9;
-  --accent-line: #cf9b43;
+  --paper: #f7f8fa;
+  --paper-2: #eef1f5;
+  --press: #e3e8ef;
+  --press-2: #d2dbe6;
+  --ink: #202b3b;
+  --ink-2: #455369;
+  --ink-3: #58677c;
+  --ink-4: #8390a1;
+  --rule: #c5ceda;
+  --rule-soft: #d2d9e3;
+  --rule-faint: #e3e8ef;
+  --accent: #3867a8;
+  --accent-ink: #294f85;
+  --accent-soft: #e5edf8;
+  --accent-line: #7196c8;
   --amber: #8a5a0b;
   --amber-soft: #f3e9d2;
-  --route-main: #b66a00;
+  --route-main: #3867a8;
   --route-branch: #147c98;
   --route-return: #b8443e;
-  --route-muted: #7f9296;
-  --route-grid: #dce6e2;
-  --route-band: #eaf0ec;
-  --code-comment: #566b72;
+  --route-muted: #8390a1;
+  --route-grid: #e3e8ef;
+  --route-band: #eef1f5;
+  --code-comment: #58677c;
   color-scheme: light;
 }
 

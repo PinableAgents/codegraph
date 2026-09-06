@@ -48,7 +48,7 @@ describe('Web UI theme preference', () => {
     vi.unstubAllGlobals();
   });
 
-  async function renderTopBar(): Promise<HTMLElement> {
+  async function renderTopBar(): Promise<HTMLSelectElement> {
     const [{ mount, tick, unmount }, { default: TopBar }] = await Promise.all([
       import('svelte'),
       import('../ui/src/components/TopBar.svelte'),
@@ -57,37 +57,38 @@ describe('Web UI theme preference', () => {
     dispose = () => unmount(mounted);
     waitForUpdate = tick;
     await waitForUpdate();
-    const group = host.querySelector<HTMLElement>('[role="group"][aria-label="主题"]');
-    expect(group).not.toBeNull();
-    return group!;
+    const settings = host.querySelector<HTMLButtonElement>('.settings');
+    expect(settings).not.toBeNull();
+    settings!.click();
+    await waitForUpdate();
+    const select = host.querySelector<HTMLSelectElement>('.panel select');
+    expect(select).not.toBeNull();
+    return select!;
   }
 
-  function button(group: HTMLElement, label: string): HTMLButtonElement {
-    const match = [...group.querySelectorAll<HTMLButtonElement>('button')].find(
-      (candidate) => candidate.textContent?.trim() === label
-    );
-    expect(match, `缺少“${label}”主题按钮`).toBeDefined();
-    return match!;
+  function choose(select: HTMLSelectElement, value: string): void {
+    select.value = value;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
   it('默认跟随系统，并可在三个主题间切换和保存', async () => {
     const group = await renderTopBar();
 
-    expect(button(group, '自动').getAttribute('aria-pressed')).toBe('true');
+    expect(group.value).toBe('auto');
     expect(document.documentElement.getAttribute('data-theme')).toBeNull();
 
-    button(group, '亮色').click();
+    choose(group, 'light');
     await waitForUpdate();
     expect(document.documentElement.getAttribute('data-theme')).toBe('light');
     expect(storage.getItem('codegraph.ui.theme')).toBe('light');
-    expect(button(group, '亮色').getAttribute('aria-pressed')).toBe('true');
+    expect(group.value).toBe('light');
 
-    button(group, '暗色').click();
+    choose(group, 'dark');
     await waitForUpdate();
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
     expect(storage.getItem('codegraph.ui.theme')).toBe('dark');
 
-    button(group, '自动').click();
+    choose(group, 'auto');
     await waitForUpdate();
     expect(document.documentElement.getAttribute('data-theme')).toBeNull();
     expect(storage.getItem('codegraph.ui.theme')).toBe('auto');
@@ -99,14 +100,14 @@ describe('Web UI theme preference', () => {
     const group = await renderTopBar();
 
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
-    expect(button(group, '暗色').getAttribute('aria-pressed')).toBe('true');
+    expect(group.value).toBe('dark');
   });
 
   it('保存失败时仍切换当前会话主题', async () => {
     const group = await renderTopBar();
     failOnSet = true;
 
-    button(group, '暗色').click();
+    choose(group, 'dark');
     await waitForUpdate();
 
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark');

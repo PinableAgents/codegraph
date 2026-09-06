@@ -17,6 +17,18 @@
   the pointer means the line NEAREST it, not the one drawn last under it.
 -->
 <script lang="ts">
+  import { graphStatus } from '../lib/graph-status.svelte';
+  import DirectoryBrowser from '../components/graph/DirectoryBrowser.svelte';
+  import { getGraphAdapter } from '../lib/adapter';
+  import { readGraphHistory, saveGraphHistory } from '../lib/graph-history';
+  import VirtualList from '../components/graph/VirtualList.svelte';
+  import BudgetNotice from '../components/graph/BudgetNotice.svelte';
+  import { graphText } from '../lib/graph-copy';
+  import DetailPanel from '../components/graph/DetailPanel.svelte';
+  import { untrack } from 'svelte';
+  import CanvasTools from '../components/graph/CanvasTools.svelte';
+  import { graphBudget } from '../lib/graph-budget';
+  import { requestLayout } from '../lib/graph-layout';
   import { SvelteFlow, Controls, type Node, type Edge, type Viewport } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
   import ScreenNode from '../components/screens/ScreenNode.svelte';
@@ -24,11 +36,10 @@
   import KindGlyph from '../components/KindGlyph.svelte';
   import { fetchScreens, type WireScreensPayload, type WireScreenLink } from '../lib/api';
   import { live } from '../lib/live.svelte';
-  import { symbolHref, fileHref, navigate, stepsHref } from '../lib/navigation';
+  import { symbolHref, fileHref, navigate, stepsHref, mapHref } from '../lib/navigation';
   import { isEdgeVisible, type MapEdgeLayout } from '../lib/map-model';
   import { commonTokens, conditionTokens, restTokens, scenarios, whenWords, type WordToken } from '../lib/conditions';
   import {
-    buildScreensModel,
     hoverPill,
     nearestEdge,
     neighbourhood,
@@ -39,6 +50,7 @@
   } from '../lib/screens-model';
 
   let payload = $state<WireScreensPayload | null>(null);
+  let retry = $state(0);
   let error = $state<string | null>(null);
   let loading = $state(true);
   let selected = $state<string | null>(null);
@@ -71,19 +83,18 @@
   });
 
   const FIT = { fitViewOptions: { padding: 0.1, maxZoom: 1, minZoom: 0.4 } };
-  /** Two clicks on one box closer than this are a double-click. */
-  const DOUBLE_CLICK_MS = 400;
-  let lastClick: { id: string; at: number } | null = null;
   const nodeTypes = { screen: ScreenNode };
   const edgeTypes = { screen: ScreenEdge };
 
   $effect(() => {
+    void retry;
     void live.indexTick;
     const controller = new AbortController();
     loading = true;
     error = null;
     fetchScreens(controller.signal)
       .then((next) => {
+        if (controller.signal.aborted) return;
         payload = next;
         loading = false;
       })
@@ -95,9 +106,22 @@
     return () => controller.abort();
   });
 
-  const model = $derived<ScreensModel | null>(
-    payload === null || !payload.routed ? null : buildScreensModel(payload)
-  );
+  let scope = $state('');
+  const scopedPayload = $derived.by(() => {
+    if (!payload || !scope) return payload;
+    const links = payload.links.filter(link => link.from === scope || link.to === scope);
+    const ids = new Set([scope, ...links.flatMap(link => [link.from, link.to])]);
+    return { ...payload, screens: payload.screens.filter(n => ids.has(n.id)), origins: payload.origins.filter(n => ids.has(n.id)), links };
+  });
+  let computedModel = $state<ScreensModel | null>(null);
+  const model = $derived(computedModel);
+  const localBudget = $derived(scopedPayload ? graphBudget(scopedPayload.screens.length + scopedPayload.origins.length, scopedPayload.links.length) : null);
+  const budget = $derived((payload as (typeof payload & { budget?: { nodes: number; edges: number; exceeded: boolean } }))?.budget ?? localBudget);
+  $effect(() => {
+    const next = scopedPayload;
+    if (!next || !next.routed || budget?.exceeded) { computedModel = null; return; }
+    return requestLayout<ScreensModel>('screens', $state.snapshot(next), {}, result => computedModel = result, message => error = message);
+  });
 
   const neighbours = $derived.by(() => {
     if (model === null || selected === null) return null;
@@ -136,22 +160,10 @@
         selected: selected === node.id,
         dimmed: neighbours !== null && !neighbours.has(node.id),
         onSelect: (id: string) => {
-          // Two clicks on the same box within a beat are a double-click: what
-          // happens from here. Read here rather than off the DOM's `dblclick`,
-          // which the flow canvas does not always pass on.
-          const now = performance.now();
-          if (lastClick !== null && lastClick.id === id && now - lastClick.at < DOUBLE_CLICK_MS) {
-            lastClick = null;
-            navigate(stepsHref({ anchor: id }));
-            return;
-          }
-          lastClick = { id, at: now };
-          selected = selected === id ? null : id;
+          selected = id;
           hovered = null;
           panelHot = null;
         },
-        // Double-click: what happens from here — the screen's (or an origin's) Steps picture.
-        onOpen: (id: string) => navigate(stepsHref({ anchor: id })),
       },
     }));
   });
@@ -282,18 +294,48 @@
     const other = side === 'from' ? nameOf(link.from) : nameOf(link.to);
     return other;
   }
+  let selectionNotice = $state('');
+  $effect(() => {
+    const ids = model ? [...model.nodes.keys()] : null;
+    if (ids && selected && !ids.includes(selected)) { selected = null; selectionNotice = graphText('索引或筛选已变化，原选中节点不在当前图中。', 'The index or filters changed; the previous selection is no longer in this graph.'); }
+  });
+  const stateKey = typeof location === 'undefined' ? '' : location.href;
+  const restored = untrack(() => readGraphHistory(stateKey));
+  if (restored.selected) selected = restored.selected;
+  scope = restored.scope ?? '';
+  $effect(() => saveGraphHistory(stateKey, { selected, scope }));
+
+  $effect(() => {
+    if (!payload) return;
+    return graphStatus.set({ nodes: nodes.length, edges: edges.length, scope: scope || graphText('所有页面', 'All screens'), filter: scope ? graphText('一跳范围', 'One-hop scope') : undefined, excluded: payload.dropped ? `${payload.dropped} ${graphText('未归属导航', 'unattributed transitions')}` : undefined,
+      budget: budget?.exceeded ? graphText('超过画布预算，请缩小范围', 'Canvas budget exceeded; narrow scope') : '400 / 2000',
+    });
+  });
 </script>
 
 {#snippet words(tokens: WordToken[])}
   {#each tokens as t, i (i)}{#if i > 0}{' '}{/if}{#if t.kw}<b class="kw">{t.text}</b>{:else}{t.text}{/if}{/each}
 {/snippet}
 
+<div class="graph-shell">
+{#if selectionNotice}<div role="status">{selectionNotice}</div>{/if}
+<div class="scopebar" role="toolbar" aria-label={graphText('页面图范围', 'Screens scope')}>
+  <label>{graphText('范围', 'Scope')} <select bind:value={scope}><option value="">{graphText('所有页面', 'All screens')}</option>{#each payload?.screens ?? [] as screen (screen.id)}<option value={screen.id}>{screen.path}</option>{/each}</select></label>
+  <button disabled={!selected} onclick={() => scope = selected ?? ''}>{graphText('聚焦选中一跳', 'Focus one hop')}</button>
+  <button disabled={!scope} onclick={() => scope = ''}>{graphText('重置范围', 'Reset scope')}</button>
+  <button disabled={!selected} onclick={() => selected && navigate(stepsHref({ anchor: selected }))}>{graphText('查看此处步骤', 'Read steps from here')}</button>
+</div>
 <div class="screens">
   <div class="stage" bind:this={stage} role="presentation" onmousemove={onStageMove} onmouseleave={() => (hovered = null)}>
-    {#if error !== null}
+    {#if error && model}<div class="retry-banner" role="alert">{error} <button onclick={() => retry++}>{graphText('重试', 'Retry')}</button></div>{/if}
+    {#if budget?.exceeded}
+      <div class="budget-scope"><BudgetNotice nodes={budget.nodes} edges={budget.edges} />
+        {#if getGraphAdapter().browse}<p>{graphText('从目录或文件继续分析；选择目录将打开对应架构图。', 'Continue through directories or files; choosing a directory opens its architecture map.')}</p><DirectoryBrowser root="" onOpen={(root) => navigate(mapHref({ root, depth: 1, tests: false }))} />{/if}
+      </div>
+    {:else if error !== null && model === null}
       <div class="state">
         <h2>The screens could not be read</h2>
-        <p>{error}</p>
+        <p>{error}</p><button onclick={() => retry++}>{graphText('重试', 'Retry')}</button>
       </div>
     {:else if loading && payload === null}
       <div class="state"><p class="dim">Reading screens and transitions…</p></div>
@@ -309,11 +351,13 @@
       </div>
     {:else if model !== null}
       <SvelteFlow
+        onlyRenderVisibleElements
         {nodes}
         {edges}
         {nodeTypes}
         {edgeTypes}
-        fitView
+        fitView={!restored.viewport}
+        initialViewport={restored.viewport}
         {...FIT}
         bind:viewport
         minZoom={0.2}
@@ -329,6 +373,7 @@
           panelHot = null;
         }}
       >
+        <CanvasTools items={[...model.nodes.values()].map(n => ({ id: n.id, label: n.label }))} {selected} onSelect={(id) => selected = id} />
         <Controls position="bottom-right" showLock={false} />
       </SvelteFlow>
 
@@ -397,7 +442,7 @@
   </div>
 
   {#if payload !== null && model !== null}
-    <aside class="side">
+    <DetailPanel><aside class="side">
       {#if selectedInfo !== null && lists !== null}
         <div class="head">
           <div>
@@ -430,7 +475,7 @@
             {selectedInfo.entry ? 'The entry screen — the app starts here.' : 'Nothing in the graph navigates here.'}
           </p>
         {/if}
-        {#each lists.opensFrom as link (link.id)}
+        <VirtualList items={lists.opensFrom} rowHeight={100}>{#snippet row(link)}
             {@const sc = scenarios(link.sites)}
           <div
             class="row"
@@ -454,11 +499,11 @@
               </div>
             {/each}
           </div>
-        {/each}
+        {/snippet}</VirtualList>
 
         <h4>Goes to <span class="dim">{lists.goesTo.length}</span></h4>
         {#if lists.goesTo.length === 0}<p class="dim">No navigation leaves this screen.</p>{/if}
-        {#each lists.goesTo as link (link.id)}
+        <VirtualList items={lists.goesTo} rowHeight={100}>{#snippet row(link)}
             {@const sc = scenarios(link.sites)}
           <div
             class="row"
@@ -484,7 +529,7 @@
               </div>
             {/each}
           </div>
-        {/each}
+        {/snippet}</VirtualList>
       {:else}
         <div class="head"><div class="big">Screens</div></div>
         <p>
@@ -521,15 +566,25 @@
           >
         {/each}
       {/if}
-    </aside>
+    </aside></DetailPanel>
   {/if}
 </div>
 
+</div>
+
 <style>
+  .budget-scope{height:100%;overflow:auto;padding:0 24px;max-width:700px}.budget-scope p{font:14px/1.6 var(--sans);color:var(--ink-2)}
+  .retry-banner{position:absolute;top:60px;left:12px;right:12px;z-index:12;background:var(--paper-2);border:1px solid var(--rule);padding:10px;font:12px var(--sans)}
+  .graph-shell{display:flex;flex-direction:column;height:100%;min-height:0;overflow:hidden}
+  .scopebar{flex:none}
+  .scopebar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--rule);background:var(--paper-2);font:14px var(--sans)}.scopebar select,.scopebar button{min-height:36px;border:1px solid var(--rule);color:var(--ink);background:var(--paper);padding:4px;font:inherit}
+
   .screens {
     display: grid;
-    grid-template-columns: minmax(600px, 1fr) 340px;
-    height: 100%;
+    grid-template-columns: minmax(0, 1fr) auto;
+    position: relative;
+    height: auto;
+    flex: 1;
     min-height: 0;
   }
   .stage {

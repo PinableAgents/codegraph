@@ -89,8 +89,8 @@
   class:dim={data.dimmed}
   style={`width:${card.width}px;height:${card.height}px`}
 >
-  <Handle type="target" position={Position.Left} id="in" isConnectable={false} />
-  <Handle type="source" position={Position.Right} id="out" isConnectable={false} />
+  <Handle aria-hidden="true" tabindex={-1} role="presentation" type="target" position={Position.Left} id="in" isConnectable={false} />
+  <Handle aria-hidden="true" tabindex={-1} role="presentation" type="source" position={Position.Right} id="out" isConnectable={false} />
 
   <button type="button" class="head" onclick={() => data.onOpen(card)}>
     <KindGlyph kind={hop.node.kind} />

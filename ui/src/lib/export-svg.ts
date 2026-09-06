@@ -66,11 +66,13 @@ import {
 } from './flow-model';
 import {
   isEdgeVisible,
+  portPoint,
   moduleMetaLabel,
   type MapEdgeLayout,
   type MapLayout,
   type MapNodeLayout,
 } from './map-model';
+import { mapEdgePath, type MapEdgeStyle } from './map-edge-path';
 import { tokensByLine, type Token } from './highlight';
 import { assignRefs, basename, type LineRef } from './symbol-model';
 import { kindLetter, FILLED_KINDS } from './kinds';
@@ -811,8 +813,11 @@ const LAYER_LABEL_SIZE = 12;
 const LAYER_RULE_BLEED = 12;
 
 export interface MapExportOptions extends ExportOptions {
+  edgeStyle?: MapEdgeStyle;
   /** The selected module, so the export draws the same edges the screen does. */
   selected?: string | null;
+  /** 与画布方向聚焦保持一致的高亮节点。 */
+  focused?: ReadonlySet<string> | null;
 }
 
 function mapNodeSvg(node: MapNodeLayout, selected: boolean, dimmed: boolean): string {
@@ -872,37 +877,28 @@ function mapNodeSvg(node: MapNodeLayout, selected: boolean, dimmed: boolean): st
   return out.join('');
 }
 
-/** A port along a box's edge: `x = left + width x (i+1)/(n+1)`. */
-function portX(node: MapNodeLayout, handles: readonly string[], id: string): number {
-  const index = handles.indexOf(id);
-  const total = handles.length;
-  if (index < 0 || total === 0) return node.x + node.width / 2;
-  return node.x + (node.width * (index + 1)) / (total + 1);
-}
-
 function mapEdgeSvg(
   edge: MapEdgeLayout,
   from: MapNodeLayout,
   to: MapNodeLayout,
-  hot: boolean
+  hot: boolean,
+  edgeStyle: MapEdgeStyle = 'curve'
 ): string {
-  const sx = portX(from, from.sourceHandles, edge.id);
-  const sy = from.y + from.height;
-  const tx = portX(to, to.targetHandles, edge.id);
-  const ty = to.y;
-  const midY = (sy + ty) / 2;
-  const path = `M${round(sx)},${round(sy)} C${round(sx)},${round(midY)} ${round(tx)},${round(midY)} ${round(tx)},${round(ty)}`;
+  const path = mapEdgePath({
+    source: portPoint(from, edge.id, 'source'),
+    target: portPoint(to, edge.id, 'target'),
+  }, edgeStyle);
   if (edge.back) {
-    return `<path d="${path}" fill="none" stroke="${EXPORT_COLORS.routeReturn}" stroke-opacity="0.82" stroke-dasharray="4 3" stroke-width="${round(edge.width)}" />`;
+    return `<path d="${path}" fill="none" stroke="${EXPORT_COLORS.routeReturn}" stroke-opacity="0.82" stroke-dasharray="4 3" stroke-width="${round(edge.width)}" marker-end="url(#map-arrow-return)" />`;
   }
-  return `<path d="${path}" fill="none" stroke="${hot ? EXPORT_COLORS.routeMain : EXPORT_COLORS.routeBranch}" stroke-opacity="${hot ? 0.95 : 0.48}" stroke-width="${round(edge.width)}" />`;
+  return `<path d="${path}" fill="none" stroke="${hot ? EXPORT_COLORS.routeMain : EXPORT_COLORS.routeBranch}" stroke-opacity="${hot ? 0.95 : 0.48}" stroke-width="${round(edge.width)}" marker-end="url(#map-arrow-${hot ? 'main' : 'branch'})" />`;
 }
 
 /** The Map as a standalone SVG. */
 export function mapSvg(layout: MapLayout, options: MapExportOptions = {}): string {
   const selected = options.selected ?? null;
   const nodes = new Map(layout.nodes.map((n) => [n.id, n]));
-  const neighbours =
+  const neighbours = options.focused ?? (
     selected === null
       ? null
       : new Set<string>([
@@ -910,7 +906,7 @@ export function mapSvg(layout: MapLayout, options: MapExportOptions = {}): strin
           ...layout.edges.flatMap((e) =>
             e.source === selected ? [e.target] : e.target === selected ? [e.source] : []
           ),
-        ]);
+        ]));
 
   // Bounds come from the boxes, and the layer rules are then drawn to fit THEM
   // — not to `layout.width`, which carries the canvas' own generous padding and
@@ -960,7 +956,7 @@ export function mapSvg(layout: MapLayout, options: MapExportOptions = {}): strin
     const from = nodes.get(edge.source);
     const to = nodes.get(edge.target);
     if (!from || !to) continue;
-    body.push(mapEdgeSvg(edge, from, to, selected !== null && !edge.back));
+    body.push(mapEdgeSvg(edge, from, to, selected !== null && !edge.back, options.edgeStyle));
   }
   for (const node of layout.nodes) {
     body.push(
@@ -970,7 +966,7 @@ export function mapSvg(layout: MapLayout, options: MapExportOptions = {}): strin
 
   return document_(
     { minX: ruleLeft, minY, width: ruleRight - ruleLeft, height: maxY - minY },
-    '',
+    [['branch', EXPORT_COLORS.routeBranch], ['main', EXPORT_COLORS.routeMain], ['return', EXPORT_COLORS.routeReturn]].map(([id, color]) => `<marker id="map-arrow-${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto"><polygon points="1,1 9,5 1,9" fill="${color}" /></marker>`).join(''),
     body.join('\n'),
     options
   );

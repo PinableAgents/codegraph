@@ -1,3 +1,6 @@
+let projectEpoch = 0;
+/** 同一项目的读取刷新也只接收最新请求；不影响保存操作的项目生命周期。 */
+let readGeneration = 0;
 /**
  * The project's own facts — loaded once, read everywhere.
  *
@@ -15,12 +18,16 @@ let inflight: Promise<void> | null = null;
 
 function load(): Promise<void> {
   if (inflight) return inflight;
+  const epoch = projectEpoch;
+  const generation = ++readGeneration;
   inflight = fetchStats()
     .then((value) => {
+      if (epoch !== projectEpoch || generation !== readGeneration) return;
       stats = value;
       error = null;
     })
     .catch((cause: unknown) => {
+      if (epoch !== projectEpoch || generation !== readGeneration) return;
       // A failure here costs a couple of numbers in the top bar and the blast
       // bar's denominator — never the screen. It is recorded, not thrown.
       error = cause instanceof Error ? cause.message : String(cause);
@@ -29,6 +36,7 @@ function load(): Promise<void> {
 }
 
 export const project = {
+  resetProject(): void { projectEpoch++; readGeneration++; stats = null; error = null; inflight = null; },
   get stats(): WireStats | null {
     return stats;
   },

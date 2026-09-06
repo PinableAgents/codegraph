@@ -49,12 +49,12 @@ describe('CodeGraph route theme', () => {
   it('exposes the complete light route palette alongside the legacy public tokens', () => {
     const host = mountTheme('light');
 
-    expect(token(host, '--route-main')).toBe('#b66a00');
+    expect(token(host, '--route-main')).toBe('#3867a8');
     expect(token(host, '--route-branch')).toBe('#147c98');
     expect(token(host, '--route-return')).toBe('#b8443e');
-    expect(token(host, '--route-muted')).toBe('#7f9296');
-    expect(token(host, '--route-grid')).toBe('#dce6e2');
-    expect(token(host, '--route-band')).toBe('#eaf0ec');
+    expect(token(host, '--route-muted')).toBe('#8390a1');
+    expect(token(host, '--route-grid')).toBe('#e3e8ef');
+    expect(token(host, '--route-band')).toBe('#eef1f5');
 
     for (const legacy of ['--paper', '--ink', '--accent', '--rule-soft', '--amber']) {
       expect(token(host, legacy), legacy).not.toBe('');
@@ -64,7 +64,7 @@ describe('CodeGraph route theme', () => {
   it('switches every route token on an explicitly dark component host', () => {
     const host = mountTheme('dark');
 
-    expect(token(host, '--route-main')).toBe('#f2b84b');
+    expect(token(host, '--route-main')).toBe('#87ace2');
     expect(token(host, '--route-branch')).toBe('#49afc7');
     expect(token(host, '--route-return')).toBe('#e06a63');
     expect(token(host, '--route-muted')).toBe('#668087');

@@ -27,7 +27,7 @@
 </script>
 
 {#each layout.ports.top as port, i (`${port.type}:${port.id}`)}
-  <Handle
+  <Handle aria-hidden="true" tabindex={-1} role="presentation"
     type={port.type}
     id={`${port.type === 'source' ? 's' : 't'}:${port.id}`}
     position={Position.Top}
@@ -52,7 +52,7 @@
 </div>
 
 {#each layout.ports.bottom as port, i (`${port.type}:${port.id}`)}
-  <Handle
+  <Handle aria-hidden="true" tabindex={-1} role="presentation"
     type={port.type}
     id={`${port.type === 'source' ? 's' : 't'}:${port.id}`}
     position={Position.Bottom}

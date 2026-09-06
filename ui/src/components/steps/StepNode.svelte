@@ -19,8 +19,6 @@
       selected: boolean;
       dimmed: boolean;
       onSelect: (id: string) => void;
-      /** Re-anchor the picture on this step — a double-click; absent for a step with no symbol. */
-      onStart?: (id: string) => void;
     }
   );
   const layout = $derived(node.layout);
@@ -31,7 +29,7 @@
 </script>
 
 {#each layout.ports.top as port, i (`${port.type}:${port.id}`)}
-  <Handle
+  <Handle aria-hidden="true" tabindex={-1} role="presentation"
     type={port.type}
     id={`${port.type === 'source' ? 's' : 't'}:${port.id}`}
     position={Position.Top}
@@ -47,11 +45,10 @@
   dimmed={node.dimmed}
   size={layout}
   onSelect={node.onSelect}
-  onStart={node.onStart}
 />
 
 {#each layout.ports.bottom as port, i (`${port.type}:${port.id}`)}
-  <Handle
+  <Handle aria-hidden="true" tabindex={-1} role="presentation"
     type={port.type}
     id={`${port.type === 'source' ? 's' : 't'}:${port.id}`}
     position={Position.Bottom}

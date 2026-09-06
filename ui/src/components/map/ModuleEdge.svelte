@@ -2,11 +2,8 @@
   /**
    * One dependency link on the Map (design spec §3.6).
    *
-   * A cubic that leaves the source's bottom port and arrives at the target's
-   * top port through the vertical midpoint, so every edge in a bundle bends the
-   * same way and the crossings stay readable. Width is `min(6, 1 + log2(count)
-   * x 0.7)`: a link carrying 700 edges must look heavier than one carrying 7
-   * without being a hundred times fatter.
+   * 曲线与直线共用端口路径，箭头、流动效果和悬停区域
+   * 保持一致。边宽按依赖数量的对数增长，避免大权重遮盖细节。
    *
    * A second, transparent, 12px-wide copy of the same path is the hit target —
    * a 1px stroke is not something anyone can hover on purpose.
@@ -16,30 +13,44 @@
    * which is exactly why they are worth marking rather than straightening out.
    */
   import { BaseEdge, type EdgeProps } from '@xyflow/svelte';
+  import { mapEdgePath, type MapEdgeStyle } from '../../lib/map-edge-path';
   import type { MapEdgeLayout } from '../../lib/map-model';
 
-  let { sourceX, sourceY, targetX, targetY, data }: EdgeProps = $props();
+  let { id, data }: EdgeProps = $props();
 
   const d = $derived(
     data as unknown as {
       edge: MapEdgeLayout;
+      points: { source: { x: number; y: number }; target: { x: number; y: number } };
       hot: boolean;
       dimmed: boolean;
+      flowing?: boolean;
+      edgeStyle?: MapEdgeStyle;
       onHover: (edge: MapEdgeLayout | null, event: MouseEvent | null) => void;
     }
   );
 
-  const path = $derived.by(() => {
-    const midY = (sourceY + targetY) / 2;
-    return `M${sourceX},${sourceY} C${sourceX},${midY} ${targetX},${midY} ${targetX},${targetY}`;
-  });
+  // 按码点编码，保留含空格、分隔符及非ASCII边ID的唯一性。
+  const markerId = $derived(`map-arrow-${Array.from(id, char => char.codePointAt(0)!.toString(16)).join('-')}`);
+  const color = $derived(d.edge.back ? 'var(--route-return)' : d.hot ? 'var(--route-main)' : 'var(--route-branch)');
+  const path = $derived(mapEdgePath(d.points, d.edgeStyle));
 </script>
 
+<defs>
+  <marker id={markerId} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+    <path d="M1,1 L9,5 L1,9 Z" fill={color} pointer-events="none" />
+  </marker>
+</defs>
 <BaseEdge
+  markerEnd={`url(#${markerId})`}
+  interactionWidth={0}
   {path}
   class={`medge${d.edge.back ? ' back' : ''}${d.hot ? ' hot' : ''}${d.dimmed ? ' dimmed' : ''}`}
   style={`stroke-width:${d.edge.width}px`}
 />
+{#if d.flowing}
+  <path class="flowing" d={path} pathLength="100" aria-hidden="true" pointer-events="none" style={`stroke:${color};stroke-width:${Math.max(2, d.edge.width)}px`} />
+{/if}
 <path
   class="hit"
   d={path}
@@ -49,6 +60,20 @@
 />
 
 <style>
+  .flowing {
+    fill: none;
+    stroke-linecap: round;
+    stroke-dasharray: 1 11;
+    stroke-opacity: 0.95;
+    pointer-events: none;
+    animation: map-flow 1.2s linear infinite;
+  }
+  /* 负偏移沿路径定义方向行进，回边仍由source流向target。 */
+  @keyframes map-flow { to { stroke-dashoffset: -12; } }
+  @media (prefers-reduced-motion: reduce) {
+    .flowing { animation: none; display: none; }
+  }
+
   :global(.svelte-flow__edge-path.medge) {
     stroke: var(--route-branch);
     stroke-opacity: 0.48;

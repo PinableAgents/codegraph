@@ -41,7 +41,7 @@
   class:dim={data.dimmed}
   style={`width:${cap.width}px;min-height:${cap.height}px`}
 >
-  <Handle type="target" position={Position.Left} id="in" isConnectable={false} />
+  <Handle aria-hidden="true" tabindex={-1} role="presentation" type="target" position={Position.Left} id="in" isConnectable={false} />
 
   <p class="lead"><b>Where the graph stops.</b> {text.intro}</p>
 

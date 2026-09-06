@@ -1,15 +1,5 @@
 <script lang="ts">
-  /**
-   * One module box on the Map (design spec §3.6): a 40px rectangle carrying
-   * the module's path and what is inside it.
-   *
-   * The handles are the point of the component. Svelte Flow routes an edge
-   * between two handles, so giving each box one hidden handle per link — laid
-   * out along its top and bottom edges at `(i+1)/(n+1)` — is what makes a
-   * bundle of eight dependencies fan across the box instead of converging on a
-   * single corner. They are invisible and non-connectable: this canvas is a
-   * drawing, never an editor.
-   */
+  /** 每个模块只保留两个连接锚点；曲线的扇出位置由纯布局端口计算。 */
   import { Handle, Position, type NodeProps } from '@xyflow/svelte';
   import { moduleMetaLabel, type MapNodeLayout } from '../../lib/map-model';
 
@@ -21,25 +11,15 @@
       selected: boolean;
       dimmed: boolean;
       onSelect: (id: string) => void;
+      onMove: (id: string, dx: number, dy: number) => void;
     }
   );
   const layout = $derived(node.layout);
   const module = $derived(layout.module);
 
-  function portStyle(index: number, total: number): string {
-    return `left:${((index + 1) / (total + 1)) * 100}%`;
-  }
 </script>
 
-{#each layout.targetHandles as handle, i (handle)}
-  <Handle
-    type="target"
-    id={`t:${handle}`}
-    position={Position.Top}
-    style={portStyle(i, layout.targetHandles.length)}
-    isConnectable={false}
-  />
-{/each}
+<Handle aria-hidden="true" tabindex={-1} role="presentation" type="target" id="in" position={Position.Top} isConnectable={false} />
 
 <button
   class="mnode"
@@ -49,6 +29,16 @@
   class:gen={layout.generated}
   style={`width:${layout.width}px;height:${layout.height}px`}
   onclick={() => node.onSelect(layout.id)}
+  onkeydown={(event) => {
+    if (!event.altKey) return;
+    const direction: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+    const delta = direction[event.key];
+    if (!delta) return;
+    event.preventDefault(); event.stopPropagation();
+    const step = event.shiftKey ? 50 : 10;
+    node.onMove(layout.id, delta[0] * step, delta[1] * step);
+  }}
+  aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight Alt+ArrowUp Alt+ArrowDown"
   aria-pressed={node.selected}
   title={`${module.id} — ${module.symbols} symbols in ${module.files} file${
     module.files === 1 ? '' : 's'
@@ -63,15 +53,7 @@
   >
 </button>
 
-{#each layout.sourceHandles as handle, i (handle)}
-  <Handle
-    type="source"
-    id={`s:${handle}`}
-    position={Position.Bottom}
-    style={portStyle(i, layout.sourceHandles.length)}
-    isConnectable={false}
-  />
-{/each}
+<Handle aria-hidden="true" tabindex={-1} role="presentation" type="source" id="out" position={Position.Bottom} isConnectable={false} />
 
 <style>
   .mnode {
@@ -86,7 +68,7 @@
     border-radius: 0;
     background: var(--paper);
     text-align: left;
-    cursor: pointer;
+    cursor: grab;
     font: inherit;
     color: var(--ink);
     box-shadow: inset 3px 0 0 var(--route-branch);
@@ -105,6 +87,7 @@
     transform: translateY(-50%);
     transition: border-color 150ms ease, background 150ms ease;
   }
+  .mnode:active { cursor: grabbing; }
   .mnode:hover,
   .mnode.sel {
     border-color: var(--route-main);

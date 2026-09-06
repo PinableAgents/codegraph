@@ -1,3 +1,4 @@
+import { enforceFlowBudget, type GraphBudgetMetadata } from './graph-budget';
 /**
  * `GET /api/flow` — the call path between two symbols, as cards.
  *
@@ -225,7 +226,7 @@ export interface WireFlowAmbiguity {
   others: WireNodeRef[];
 }
 
-export interface WireFlowPayload {
+export interface WireFlowPayload extends GraphBudgetMetadata {
   query: {
     kind: 'directed' | 'symbols' | 'trail';
     from: string | null;
@@ -671,6 +672,7 @@ export async function buildFlow(
   query: URLSearchParams
 ): Promise<WireFlowPayload> {
   const started = Date.now();
+  const finish = (payload: WireFlowPayload): WireFlowPayload => query.get('bounded') === '1' ? enforceFlowBudget(payload) : payload;
   const parsed = parseFlowQuery(query);
   const maxFlows = intParam(query, 'limit', { min: 1, max: MAX_FLOWS, default: MAX_FLOWS });
   const stats = cg.getStats();
@@ -703,7 +705,7 @@ export async function buildFlow(
       raw.push({ node, edge: link?.edge ?? null, upward: link?.upward ?? hop.dir === 'up' });
     }
     const flows = raw.length >= 2 ? [await toWireFlow(cg, projectRoot, cache, raw)] : [];
-    return {
+    return finish({
       ...base,
       query: { kind: 'trail', from: null, to: null, symbols: [] },
       flows,
@@ -713,7 +715,7 @@ export async function buildFlow(
           ? null
           : 'None of the symbols on this trail are still in the index. Re-index, or start a new trail.',
       timing: { elapsedMs: Date.now() - started },
-    };
+    });
   }
 
   const directed = parsed.kind === 'directed';
@@ -799,7 +801,7 @@ export async function buildFlow(
     }
   }
 
-  return {
+  return finish({
     ...base,
     query: {
       kind: parsed.kind,
@@ -814,7 +816,7 @@ export async function buildFlow(
     // was not found, and the cap says where the looking stopped.
     reason: flow.chains.length > 0 ? null : noFlowReason(parsed, flow.tokens.length, unresolved),
     timing: { elapsedMs: Date.now() - started },
-  };
+  });
 }
 
 /**

@@ -473,3 +473,53 @@ describe('directional ports and room', () => {
     expect(wide.layers[0]!.y - wide.layers[1]!.y).toBe(NODE_HEIGHT + 116);
   });
 });
+
+describe('大型强连通分量紧凑布局', () => {
+  const ring = (size: number) => {
+    const modules = Array.from({ length: size }, (_, i) => mod(`module-${String(i).padStart(3, '0')}`));
+    const links = modules.flatMap((module, i) => Array.from({ length: 5 }, (_, offset) => link(module.id, modules[(i + offset + 1) % size]!.id, 10)));
+    return { modules, links };
+  };
+  it('400节点2000边保持完整、有限端口且节点不重叠', () => {
+    const layout = buildMapLayout(ring(400), OPTS);
+    expect(layout.nodes).toHaveLength(400);
+    expect(layout.edges).toHaveLength(2000);
+    expect(layout.compactCycles?.[0]).toHaveLength(400);
+    expect(new Set(layout.nodes.map(n => n.y)).size).toBe(20);
+    expect(layout.height).toBeLessThan(4000);
+    expect(layout.width).toBeLessThan(10000);
+    const nodes = new Map(layout.nodes.map(n => [n.id, n]));
+    for (let i = 0; i < layout.nodes.length; i++) {
+      const a = layout.nodes[i]!;
+      for (const b of layout.nodes.slice(i + 1)) {
+        expect(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y).toBe(true);
+      }
+    }
+    for (const edge of layout.edges) {
+      const from = nodes.get(edge.source)!; const to = nodes.get(edge.target)!;
+      expect(from.sourceHandles).toContain(edge.id);
+      expect(to.targetHandles).toContain(edge.id);
+      const source = portPoint(from, edge.sourceHandle, 'source');
+      const target = portPoint(to, edge.targetHandle, 'target');
+      expect(Number.isFinite(source.x) && Number.isFinite(target.x)).toBe(true);
+      expect(source.y).toBe(from.y + from.height);
+      expect(target.y).toBe(to.y);
+      expect(isEdgeVisible(edge, null)).toBe(true);
+    }
+  });
+  it('顺序不依赖输入排列，跨分量的依赖仍向下', () => {
+    const payload = ring(25);
+    payload.modules.push(mod('entry'), mod('foundation'));
+    payload.links.push(link('entry', 'module-000', 10), link('module-010', 'foundation', 10));
+    const layout = buildMapLayout(payload, OPTS);
+    const reversed = buildMapLayout({ modules: [...payload.modules].reverse(), links: [...payload.links].reverse() }, OPTS);
+    const positions = (value: MapLayout) => value.nodes.map(({ id, x, y }) => ({ id, x, y })).sort((a,b) => a.id.localeCompare(b.id));
+    expect(positions(layout)).toEqual(positions(reversed));
+    expect(layerOf(layout, 'entry')).toBeGreaterThan(Math.max(...layout.nodes.filter(n => n.id.startsWith('module-')).map(n => n.layer)));
+    expect(layerOf(layout, 'foundation')).toBeLessThan(Math.min(...layout.nodes.filter(n => n.id.startsWith('module-')).map(n => n.layer)));
+  });
+  it('小型循环继续使用原有逐层布局', () => {
+    const layout = buildMapLayout(ring(19), OPTS);
+    expect(layout.compactCycles).toBeUndefined();
+  });
+});

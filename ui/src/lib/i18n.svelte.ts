@@ -4,6 +4,7 @@ const storageKey = 'codegraph.ui.locale';
 const localeListeners = new Set<() => void>();
 
 const visibleCopy: Record<string, string> = {
+  'The event lands in a component of another screen — a picture of its own. Start here to see it, or continue through screens from the summary.': '事件进入另一个界面的组件。可从这里打开该界面，或从摘要继续穿过界面。',
   'Search for a symbol or a file to start reading in ': '搜索符号或文件，开始阅读 ',
   ' — every list below is read out of the graph, not guessed from a filename.': '——下面的每个列表都直接读取自图谱，而非根据文件名猜测。',
   'Nothing selected': '未选择任何内容',
@@ -511,6 +512,82 @@ const visiblePhrases = Object.entries(visibleCopy)
 
 const translations = {
   'zh-CN': {
+    "wb.statusBar": "工作台状态",
+    "wb.currentView": "当前分析",
+    "wb.indexUpdatedAt": "索引更新于 {time}",
+    "wb.displayCounts": "当前显示 {nodes} 节点 · {edges} 边",
+    "wb.indexCounts": "索引总量 {nodes} 节点 · {edges} 边 · {files} 文件",
+    "wb.graphScope": "范围",
+    "wb.graphFilter": "界面过滤",
+    "wb.graphExcluded": "后端排除",
+    "wb.graphBudget": "预算",
+    'wb.retryWorkspace': '重新加载项目状态',
+    'wb.reloading': '正在重新加载…',
+    "wb.allRelations": "全部关系",
+    "wb.direction": "方向",
+    "wb.incoming": "上游引用",
+    "wb.outgoing": "下游引用",
+    "wb.relationPage": "第 {page} 页 · 每页最多 50 条",
+    "wb.reloadRelations": "重新加载第一页",
+    "wb.noRelations": "没有此方向的关系",
+    "wb.firstPage": "第一页",
+    "wb.nextPage": "下一页",
+    "wb.workspace": "工作区",
+    "wb.nav": "工作台导航",
+    "wb.collapse": "折叠导航",
+    "wb.switch": "切换项目",
+    "wb.choose": "选择项目",
+    "wb.overview": "项目概览",
+    "wb.map": "架构依赖",
+    "wb.execution": "执行链路",
+    "wb.steps": "执行步骤",
+    "wb.flow": "路径追踪",
+    "wb.screens": "页面流转",
+    "wb.entries": "入口点",
+    "wb.reading": "代码阅读",
+    "wb.dead": "未引用代码",
+    "wb.unavailable": "不可用",
+    "wb.unavailableSuffix": "（不可用）",
+    "wb.loading": "正在加载工作区…",
+    "wb.missing": "项目不存在或不可用",
+    "wb.back": "返回工作区",
+    "wb.settings": "项目设置",
+    "wb.workspaceSettings": "工作区设置",
+    "wb.theme": "主题",
+    "wb.language": "语言",
+    "wb.auto": "跟随系统",
+    "wb.light": "浅色",
+    "wb.dark": "深色",
+    "wb.closeSettings": "关闭设置",
+    "wb.shortcuts": "快捷键：⌘/Ctrl K 搜索 · M 架构 · F 链路 · [ 返回",
+    "wb.search": "全局搜索",
+    "wb.searchPlaceholder": "搜索符号、文件…  ⌘ K",
+    "wb.results": "全局搜索结果",
+    "wb.scope": "搜索项目",
+    "wb.all": "全部项目",
+    "wb.close": "关闭",
+    "wb.filters": "可组合 path:src lang:typescript kind:function 筛选",
+    "wb.searching": "正在搜索…",
+    "wb.noResults": "未找到匹配结果",
+    "wb.searchHint": "输入名称，在所有项目中查找代码。",
+    "wb.limited": "结果已截断，请增加筛选条件。",
+    "wb.intro": "选择项目，探索架构依赖、执行链路与代码。",
+    "wb.available": "索引可用",
+    "wb.enter": "进入项目 →",
+    "wb.indexUnavailable": "项目索引暂不可读",
+    "wb.projectLoading": "正在加载项目…",
+    "wb.projectIntro": "从结构与执行行为入手，逐步定位到源码。",
+    "wb.files": "索引文件",
+    "wb.nodes": "代码节点",
+    "wb.edges": "项目内关系",
+    "wb.mapHint": "从模块到文件，按需展开依赖关系。",
+    "wb.executionHint": "沿入口追踪调用步骤与页面流转。",
+    "wb.readingHint": "从入口点查找符号与源码。",
+    "wb.deadHint": "检查索引中没有引用的符号。",
+    "wb.incomplete": "部分项目不可用：{reasons}",
+    "wb.counts": "{files} 文件 · {nodes} 节点",
+    "wb.loadError": "工作区加载失败 ({status})",
+    "wb.searchError": "搜索失败 ({status})",
     'a11y.home': 'CodeGraph 首页',
     'a11y.indexedProject': '已索引项目',
     'a11y.language': '界面语言',
@@ -551,6 +628,82 @@ const translations = {
     'toast.indexUpdated': '索引已更新并重新加载',
   },
   en: {
+    "wb.statusBar": "Workbench status",
+    "wb.currentView": "Current analysis",
+    "wb.indexUpdatedAt": "Index updated at {time}",
+    "wb.displayCounts": "Showing {nodes} nodes · {edges} edges",
+    "wb.indexCounts": "Index totals: {nodes} nodes · {edges} edges · {files} files",
+    "wb.graphScope": "Scope",
+    "wb.graphFilter": "View filters",
+    "wb.graphExcluded": "Backend exclusions",
+    "wb.graphBudget": "Budget",
+    'wb.retryWorkspace': 'Reload project status',
+    'wb.reloading': 'Reloading…',
+    "wb.allRelations": "All relationships",
+    "wb.direction": "Direction",
+    "wb.incoming": "Incoming references",
+    "wb.outgoing": "Outgoing references",
+    "wb.relationPage": "Page {page} · up to 50 relationships per page",
+    "wb.reloadRelations": "Reload from first page",
+    "wb.noRelations": "No relationships in this direction",
+    "wb.firstPage": "First page",
+    "wb.nextPage": "Next page",
+    "wb.workspace": "Workspace",
+    "wb.nav": "Workbench navigation",
+    "wb.collapse": "Toggle navigation",
+    "wb.switch": "Switch project",
+    "wb.choose": "Choose project",
+    "wb.overview": "Project overview",
+    "wb.map": "Architecture",
+    "wb.execution": "Execution",
+    "wb.steps": "Steps",
+    "wb.flow": "Trace path",
+    "wb.screens": "Screens",
+    "wb.entries": "Entry points",
+    "wb.reading": "Code reader",
+    "wb.dead": "Unreferenced code",
+    "wb.unavailable": "Unavailable",
+    "wb.unavailableSuffix": " (unavailable)",
+    "wb.loading": "Loading workspace…",
+    "wb.missing": "Project missing or unavailable",
+    "wb.back": "Back to workspace",
+    "wb.settings": "Project settings",
+    "wb.workspaceSettings": "Workspace settings",
+    "wb.theme": "Theme",
+    "wb.language": "Language",
+    "wb.auto": "System",
+    "wb.light": "Light",
+    "wb.dark": "Dark",
+    "wb.closeSettings": "Close settings",
+    "wb.shortcuts": "Shortcuts: ⌘/Ctrl K search · M architecture · F flow · [ back",
+    "wb.search": "Global search",
+    "wb.searchPlaceholder": "Search symbols and files…  ⌘ K",
+    "wb.results": "Global search results",
+    "wb.scope": "Search project",
+    "wb.all": "All projects",
+    "wb.close": "Close",
+    "wb.filters": "Combine path:src lang:typescript kind:function filters",
+    "wb.searching": "Searching…",
+    "wb.noResults": "No matching results",
+    "wb.searchHint": "Enter a name to find code across all projects.",
+    "wb.limited": "Results truncated. Add filters to narrow your search.",
+    "wb.intro": "Choose a project to explore architecture, execution paths and code.",
+    "wb.available": "Index available",
+    "wb.enter": "Open project →",
+    "wb.indexUnavailable": "Project index is temporarily unavailable",
+    "wb.projectLoading": "Loading project…",
+    "wb.projectIntro": "Explore structure and execution to locate the relevant source.",
+    "wb.files": "Indexed files",
+    "wb.nodes": "Code nodes",
+    "wb.edges": "Project relationships",
+    "wb.mapHint": "Expand dependencies from modules to files on demand.",
+    "wb.executionHint": "Follow entry points through calls and screen transitions.",
+    "wb.readingHint": "Find symbols and source from entry points.",
+    "wb.deadHint": "Inspect symbols with no references in the index.",
+    "wb.incomplete": "Some projects are unavailable: {reasons}",
+    "wb.counts": "{files} files · {nodes} nodes",
+    "wb.loadError": "Workspace failed to load ({status})",
+    "wb.searchError": "Search failed ({status})",
     'a11y.home': 'CodeGraph home',
     'a11y.indexedProject': 'Indexed project',
     'a11y.language': 'Interface language',
@@ -686,50 +839,104 @@ export const i18n = {
 };
 
 export function localize(node: HTMLElement): { destroy: () => void } {
-  const textSources = new WeakMap<Text, string>();
-  const attributeSources = new WeakMap<Element, Map<string, string>>();
+  interface Source { original: string; rendered: string }
+  const textSources = new WeakMap<Text, Source>();
+  const attributeSources = new WeakMap<Element, Map<string, Source>>();
   const attributeNames = ['aria-label', 'placeholder', 'title'];
   const excludedSelector =
     'code, pre, h1, .code, .sig, .doc, .path, .loc, .name, .dir, .base, [data-no-localize]';
 
-  const apply = (): void => {
-    document.documentElement.lang = locale;
-    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
-    let current: Text | null;
-    while ((current = walker.nextNode() as Text | null)) {
-      if (current.parentElement?.closest(excludedSelector)) continue;
-      const source = textSources.get(current) ?? current.data;
-      textSources.set(current, source);
-      const translated = translateVisibleText(source, locale);
-      if (current.data !== translated) current.data = translated;
-    }
-    for (const element of [node, ...node.querySelectorAll('*')]) {
-      if (element.closest(excludedSelector)) continue;
-      let sources = attributeSources.get(element);
-      for (const name of attributeNames) {
-        const currentValue = element.getAttribute(name);
-        if (currentValue === null) continue;
-        sources ??= new Map();
-        const source = sources.get(name) ?? currentValue;
-        sources.set(name, source);
-        const translated = translateVisibleText(source, locale);
-        if (currentValue !== translated) element.setAttribute(name, translated);
-      }
-      if (sources) attributeSources.set(element, sources);
-    }
-  };
+  function translate(current: string, previous?: Source): Source {
+    // 框架重新写入的动态值取代旧原文；本次译文不反向覆盖原文缓存。
+    const original = previous?.rendered === current ? previous.original : current;
+    return { original, rendered: translateVisibleText(original, locale) };
+  }
 
-  const observer = new MutationObserver(apply);
-  observer.observe(node, { childList: true, characterData: true, subtree: true });
-  const removeListener = (() => {
-    localeListeners.add(apply);
-    return () => localeListeners.delete(apply);
-  })();
-  apply();
+  function applyText(text: Text): void {
+    if (text.parentElement?.closest(excludedSelector)) return;
+    const source = translate(text.data, textSources.get(text));
+    textSources.set(text, source);
+    if (text.data !== source.rendered) text.data = source.rendered;
+  }
+
+  function applyAttribute(element: Element, name: string): void {
+    if (element.closest(excludedSelector)) return;
+    const current = element.getAttribute(name);
+    let sources = attributeSources.get(element);
+    if (current === null) { sources?.delete(name); return; }
+    const source = translate(current, sources?.get(name));
+    sources ??= new Map();
+    sources.set(name, source);
+    attributeSources.set(element, sources);
+    if (current !== source.rendered) element.setAttribute(name, source.rendered);
+  }
+
+  function applySubtree(root: Node): void {
+    if (root.nodeType === Node.TEXT_NODE) { applyText(root as Text); return; }
+    if (!(root instanceof Element) || root.closest(excludedSelector)) return;
+    const visit = (current: Node) => {
+      if (current.nodeType === Node.TEXT_NODE) applyText(current as Text);
+      else for (const name of attributeNames) applyAttribute(current as Element, name);
+    };
+    visit(root);
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+      acceptNode(current) {
+        return current instanceof Element && current.matches(excludedSelector)
+          ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    let current: Node | null;
+    while ((current = walker.nextNode())) visit(current);
+  }
+
+  const observation: MutationObserverInit = {
+    childList: true, characterData: true, subtree: true,
+    attributes: true, attributeFilter: attributeNames,
+  };
+  function withoutOwnMutations(apply: () => void): void {
+    // 当前批次已拿到变动记录；暂停观察自己的写入，避免产生第二轮无效处理。
+    observer.disconnect();
+    try { apply(); } finally { observer.observe(node, observation); }
+  }
+  const observer = new MutationObserver(records => {
+    const roots = new Set<Node>();
+    const attributes = new Map<Element, Set<string>>();
+    for (const record of records) {
+      if (record.type === 'characterData') roots.add(record.target);
+      else if (record.type === 'childList') {
+        for (const added of record.addedNodes) roots.add(added);
+      } else if (record.attributeName) {
+        const element = record.target as Element;
+        const names = attributes.get(element) ?? new Set<string>();
+        names.add(record.attributeName); attributes.set(element, names);
+      }
+    }
+    const covered = (target: Node, includeSelf = false): boolean => {
+      for (let parent = includeSelf ? target : target.parentNode; parent; parent = parent.parentNode) {
+        if (roots.has(parent)) return true;
+        if (parent === node) break;
+      }
+      return false;
+    };
+    withoutOwnMutations(() => {
+      for (const root of roots) if (node.contains(root) && !covered(root)) applySubtree(root);
+      for (const [element, names] of attributes) {
+        if (node.contains(element) && !covered(element, true)) {
+          for (const name of names) applyAttribute(element, name);
+        }
+      }
+    });
+  });
+  const applyAll = (): void => {
+    document.documentElement.lang = locale;
+    withoutOwnMutations(() => applySubtree(node));
+  };
+  localeListeners.add(applyAll);
+  applyAll();
   return {
     destroy() {
       observer.disconnect();
-      removeListener();
+      localeListeners.delete(applyAll);
     },
   };
 }

@@ -167,7 +167,7 @@ export function canDrawSteps(): boolean {
 }
 
 export function fetchMap(
-  opts: { root?: string | null; depth?: number } = {},
+  opts: import('./adapter').MapRequest = {},
   signal?: AbortSignal
 ): Promise<WireMapPayload> {
   return getGraphAdapter().map(opts, signal);
@@ -231,4 +231,16 @@ export function deleteTrail(id: string, signal?: AbortSignal): Promise<WireTrail
     return Promise.reject(new ApiFailure(0, 'refused', 'This viewer cannot delete trails.', null));
   }
   return adapter.deleteTrail(id, signal);
+}
+
+/** 旧宿主缺少分页能力时，调用方保留原来的有界列表。 */
+export function fetchBrowse(request: import('./adapter').BrowseRequest, signal?: AbortSignal): Promise<import('./wire').WireBrowsePage> {
+  const method = getGraphAdapter().browse;
+  if (!method) return Promise.reject(new ApiFailure(501, 'unsupported', '宿主未提供目录分页。', null));
+  return method(request, signal);
+}
+export function fetchNeighbors(request: import('./adapter').NeighborRequest, signal?: AbortSignal): Promise<import('./wire').WireNeighborPage> {
+  const method = getGraphAdapter().neighbors;
+  if (!method) return Promise.reject(new ApiFailure(501, 'unsupported', '宿主未提供关系分页。', null));
+  return method(request, signal);
 }

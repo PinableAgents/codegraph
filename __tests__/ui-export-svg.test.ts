@@ -31,7 +31,8 @@ import {
   wrapText,
 } from '../ui/src/lib/export-svg';
 import { buildFlowLayout } from '../ui/src/lib/flow-model';
-import { buildMapLayout } from '../ui/src/lib/map-model';
+import { mapEdgePath } from '../ui/src/lib/map-edge-path';
+import { buildMapLayout, portPoint, isEdgeVisible } from '../ui/src/lib/map-model';
 import type {
   WireFlow,
   WireFlowBoundary,
@@ -444,6 +445,20 @@ describe('mapSvg', () => {
     ],
   };
   const layout = buildMapLayout(payload, { includeTests: false });
+
+  it.each(['curve', 'straight'] as const)('导出 %s 线型复用端口路径并保留末端箭头', edgeStyle => {
+    const svg = mapSvg(layout, { edgeStyle });
+    assertWellFormed(svg);
+    for (const edge of layout.edges.filter(edge => isEdgeVisible(edge, null))) {
+      const from = layout.nodes.find(node => node.id === edge.source)!;
+      const to = layout.nodes.find(node => node.id === edge.target)!;
+      const path = mapEdgePath({ source: portPoint(from, edge.id, 'source'), target: portPoint(to, edge.id, 'target') }, edgeStyle);
+      expect(svg).toContain(`<path d="${path}"`);
+      const element = svg.slice(svg.indexOf(`<path d="${path}"`)).split('/>')[0]!;
+      expect(element).toContain('marker-end="url(#map-arrow-');
+    }
+    if (edgeStyle === 'curve') expect(svg).toBe(mapSvg(layout));
+  });
 
   it('is well-formed, light, and marked', () => {
     const svg = mapSvg(layout);

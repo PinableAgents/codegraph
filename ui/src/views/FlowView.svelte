@@ -14,6 +14,15 @@
   path so far, so the strip hands the reader off to the view that goes deep.
 -->
 <script lang="ts">
+  import { graphStatus } from '../lib/graph-status.svelte';
+  import { readGraphHistory, saveGraphHistory } from '../lib/graph-history';
+  import BudgetNotice from '../components/graph/BudgetNotice.svelte';
+  import { graphText } from '../lib/graph-copy';
+  import SymbolPicker from '../components/graph/SymbolPicker.svelte';
+  import { untrack } from 'svelte';
+  import CanvasTools from '../components/graph/CanvasTools.svelte';
+  import { graphBudget } from '../lib/graph-budget';
+  import { requestLayout } from '../lib/graph-layout';
   import { SvelteFlow, Controls, type Node, type Edge } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
   import FlowCard from '../components/flow/FlowCard.svelte';
@@ -23,10 +32,10 @@
   import { exportFilename, flowSvg } from '../lib/export-svg';
   import { fetchFlow, type WireFlow, type WireFlowPayload } from '../lib/api';
   import { live } from '../lib/live.svelte';
-  import { navigate, symbolHref } from '../lib/navigation';
+  import { navigate, symbolHref, flowHref } from '../lib/navigation';
   import { trail, encodeTrail, type TrailHop } from '../lib/trail.svelte';
   import { decodeTrail } from '../lib/trail-codec';
-  import { buildFlowLayout, type FlowCardLayout, type FlowLayout } from '../lib/flow-model';
+  import { type FlowCardLayout, type FlowLayout } from '../lib/flow-model';
   import { basename } from '../lib/symbol-model';
 
   interface Props {
@@ -40,11 +49,16 @@
   let { from, to, symbols, trailParam }: Props = $props();
 
   let payload = $state<WireFlowPayload | null>(null);
+  let retry = $state(0);
   let error = $state<string | null>(null);
   let loading = $state(true);
   let picked = $state<string | null>(null);
   /** True when the picker is on "All paths" — the union is drawn as a DAG. */
   let showAll = $state(false);
+
+  let fromChoice = $state('');
+  let toChoice = $state('');
+  $effect(() => { fromChoice = from ?? ''; toChoice = to ?? ''; });
 
   const ALL = 'all-paths';
 
@@ -65,6 +79,7 @@
   const trailHops = $derived<TrailHop[]>(trailParam ? decodeTrail(trailParam) : []);
 
   $effect(() => {
+    void retry;
     const spec = trailParam
       ? { trail: trailHops.map((h) => `${h.dir === 'start' ? 's' : h.dir === 'up' ? 'u' : 'd'}${h.id}`) }
       : symbols
@@ -83,9 +98,10 @@
     const controller = new AbortController();
     loading = true;
     error = null;
-    const keep = picked;
+    const keep = untrack(() => picked);
     fetchFlow(spec, controller.signal)
       .then((next) => {
+        if (controller.signal.aborted) return;
         payload = next;
         // A refresh keeps the reader's chosen path when it survived the sync.
         picked = next.flows.some((f) => f.id === keep) ? keep : (next.flows[0]?.id ?? null);
@@ -99,13 +115,20 @@
     return () => controller.abort();
   });
 
-  const flows = $derived<WireFlow[]>(payload?.flows ?? []);
+  const flows = $derived<WireFlow[]>((payload?.flows ?? []).slice(0, 4));
   const shown = $derived<WireFlow[]>(
     showAll ? flows : flows.filter((f) => f.id === picked).slice(0, 1)
   );
-  const layout = $derived<FlowLayout | null>(
-    shown.length === 0 ? null : buildFlowLayout(showAll ? flows : shown, picked)
-  );
+  let layout = $state<FlowLayout | null>(null);
+  let layoutPending = $state(false);
+  const localBudget = $derived(graphBudget(new Set(shown.flatMap(f => f.hops.map(h => h.node.id))).size + shown.reduce((n,f) => n + (f.boundary ? 1 : 0), 0), shown.reduce((n,f) => n + f.hops.length, 0)));
+  const budget = $derived((payload as (typeof payload & { budget?: { nodes: number; edges: number; exceeded: boolean } }))?.budget ?? localBudget);
+  $effect(() => {
+    const next = shown; const options = { picked };
+    if (!next.length || budget.exceeded) { layout = null; layoutPending = false; return; }
+    layoutPending = true;
+    return requestLayout<FlowLayout>('flow', $state.snapshot(next), options, result => { layout = result; layoutPending = false; }, message => { error = message; layoutPending = false; });
+  });
   const activeFlow = $derived(flows.find((f) => f.id === picked) ?? flows[0] ?? null);
 
   const nodes = $derived.by<Node[]>(() => {
@@ -249,11 +272,26 @@
       caption: showAll ? exportLabel : `${exportLabel}${hops > 1 ? ` · ${hops} hops` : ''}`,
     });
   }
+  const stateKey = typeof location === 'undefined' ? '' : location.href;
+  const restored = untrack(() => readGraphHistory(stateKey));
+  picked = restored.picked ?? null;
+  showAll = restored.showAll ?? false;
+  $effect(() => saveGraphHistory(stateKey, { picked, showAll }));
+  $effect(() => {
+    if (!payload) return;
+    return graphStatus.set({ nodes: nodes.length, edges: edges.length, scope: exportLabel, filter: showAll ? graphText('所有已返回路径，最多4条', 'All returned paths, at most 4') : graphText('单条路径', 'Single path'), excluded: payload.unresolved?.length ? `${payload.unresolved.length} ${graphText('未解析符号', 'unresolved symbols')}` : undefined,
+      budget: budget?.exceeded ? graphText('超过画布预算，请缩小范围', 'Canvas budget exceeded; narrow scope') : '400 / 2000',
+    });
+  });
 </script>
 
 <div class="flowview">
   <header class="fhead">
     <h1>Flow</h1>
+    <SymbolPicker label={graphText('起点', 'From')} bind:value={fromChoice} />
+    <button aria-label={graphText('交换起终点', 'Swap endpoints')} onclick={() => { const old = fromChoice; fromChoice = toChoice; toChoice = old; }}>⇄</button>
+    <SymbolPicker label={graphText('终点', 'To')} bind:value={toChoice} />
+    <button disabled={!fromChoice || !toChoice} onclick={() => navigate(flowHref({ from: fromChoice, to: toChoice }))}>{graphText('查找路径', 'Find paths')}</button>
     {#if flows.length > 0}
       <select
         aria-label="Which path to draw"
@@ -270,7 +308,7 @@
           >
         {/each}
         {#if flows.length > 1}
-          <option value={ALL}>All {flows.length} paths</option>
+          <option value={ALL}>{graphText('所有已返回路径', 'All returned paths')} ({flows.length}/4)</option>
         {/if}
       </select>
     {/if}
@@ -283,10 +321,13 @@
   </header>
 
   <div class="fstage">
-    {#if error !== null}
+    {#if error && layout}<div class="retry-banner" role="alert">{error} <button onclick={() => retry++}>{graphText('重试', 'Retry')}</button></div>{/if}
+    {#if budget?.exceeded}
+      <BudgetNotice nodes={budget.nodes} edges={budget.edges} />
+    {:else if error !== null && layout === null}
       <div class="state">
         <h2>The flow could not be built</h2>
-        <p>{error}</p>
+        <p>{error}</p><button onclick={() => retry++}>{graphText('重试', 'Retry')}</button>
       </div>
     {:else if loading && payload === null}
       <div class="state"><p class="dim">Following the calls…</p></div>
@@ -298,6 +339,8 @@
           <span class="mono">execute -&gt; getFile</span> — or walk a trail and read it as a flow.
         </p>
       </div>
+    {:else if layoutPending && layout === null}
+      <div class="state" role="status"><p>{graphText('正在布局已找到的路径…', 'Laying out the returned paths…')}</p></div>
     {:else if layout === null}
       <div class="state">
         <h2>No path between them</h2>
@@ -311,11 +354,12 @@
       </div>
     {:else}
       <SvelteFlow
+        onlyRenderVisibleElements
         {nodes}
         {edges}
         {nodeTypes}
         {edgeTypes}
-        initialViewport={START_VIEWPORT}
+        initialViewport={restored.viewport ?? START_VIEWPORT}
         fitViewOptions={{ padding: 0.1, maxZoom: 1, minZoom: 0.2 }}
         minZoom={0.2}
         maxZoom={1.4}
@@ -325,6 +369,7 @@
         panOnDrag
         proOptions={{ hideAttribution: true }}
       >
+        <CanvasTools items={layout.cards.map(n => ({ id: n.id, label: n.hop.node.name }))} />
         <Controls position="bottom-right" showLock={false} />
       </SvelteFlow>
     {/if}
@@ -354,6 +399,7 @@
 </div>
 
 <style>
+  .retry-banner{position:absolute;top:60px;left:12px;right:12px;z-index:12;background:var(--paper-2);border:1px solid var(--rule);padding:10px;font:12px var(--sans)}
   .flowview {
     display: grid;
     height: 100%;
@@ -363,6 +409,7 @@
 
   .fhead {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     padding: 12px 18px;
     border-bottom: 1px solid var(--route-branch);
@@ -378,13 +425,14 @@
     border-left: 3px solid var(--route-main);
   }
 
-  .fhead select {
+  .fhead select, .fhead button {
+    min-height: 36px;
     padding: 3px 6px;
     background: var(--paper-2);
     color: var(--ink);
     border: 1px solid var(--route-branch);
     border-radius: 0;
-    font: 12.5px var(--sans);
+    font: 14px var(--sans);
   }
 
   .note {

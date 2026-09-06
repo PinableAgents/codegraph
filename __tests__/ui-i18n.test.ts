@@ -190,3 +190,44 @@ describe('Web UI i18n', () => {
     expect(failures).toEqual([]);
   });
 });
+
+describe('增量本地化', () => {
+  it('新增单个结果不重新读取已有400个图节点', async () => {
+    const { i18n, localize } = await import('../ui/src/lib/i18n.svelte');
+    i18n.setLocale('zh-CN');
+    const root = document.createElement('main');
+    root.innerHTML = Array.from({ length: 400 }, () => '<div title="Flow"><span>Flow</span></div>').join('');
+    document.body.append(root);
+    const action = localize(root);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const readExisting = vi.spyOn(root.firstElementChild!, 'getAttribute');
+    const result = document.createElement('p'); result.textContent = 'Searching…';
+    root.append(result);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(result.textContent).toBe('正在搜索…');
+    expect(readExisting).not.toHaveBeenCalled();
+    action.destroy(); root.remove(); readExisting.mockRestore();
+  });
+
+  it('动态计数和属性采用最新原文，并能往返切换语言', async () => {
+    const { i18n, localize } = await import('../ui/src/lib/i18n.svelte');
+    i18n.setLocale('zh-CN');
+    const root = document.createElement('main');
+    root.innerHTML = '<p title="Flow">2 symbols in 1 file · 10 lines</p><code>Flow</code>';
+    document.body.append(root);
+    const action = localize(root);
+    const text = root.querySelector('p')!.firstChild as Text;
+    text.data = '3 symbols in 2 files · 11 lines';
+    root.querySelector('p')!.setAttribute('title', 'Search results');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(text.data).toBe('3 个符号，位于 2 个文件 · 11 行');
+    expect(root.querySelector('p')!.title).toBe('搜索结果');
+    i18n.setLocale('en');
+    expect(text.data).toBe('3 symbols in 2 files · 11 lines');
+    expect(root.querySelector('p')!.title).toBe('Search results');
+    i18n.setLocale('zh-CN');
+    expect(text.data).toBe('3 个符号，位于 2 个文件 · 11 行');
+    expect(root.querySelector('code')!.textContent).toBe('Flow');
+    action.destroy(); root.remove();
+  });
+});

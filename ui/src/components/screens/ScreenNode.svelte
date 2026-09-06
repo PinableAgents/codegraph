@@ -25,8 +25,6 @@
       selected: boolean;
       dimmed: boolean;
       onSelect: (id: string) => void;
-      /** Open what happens from this screen (the Steps picture) — a double-click. */
-      onOpen?: (id: string) => void;
     }
   );
   const layout = $derived(node.layout);
@@ -38,7 +36,7 @@
 </script>
 
 {#each layout.ports.top as port, i (`${port.type}:${port.id}`)}
-  <Handle
+  <Handle aria-hidden="true" tabindex={-1} role="presentation"
     type={port.type}
     id={`${port.type === 'source' ? 's' : 't'}:${port.id}`}
     position={Position.Top}
@@ -56,26 +54,19 @@
   class:unreached={info.unreached}
   style={`width:${layout.width}px;height:${layout.height}px`}
   onclick={() => node.onSelect(info.id)}
-  ondblclickcapture={(e) => {
-    // The flow canvas zooms on a double-click that reaches its pane; a
-    // double-click on a box is a navigation, not a zoom — stop it here,
-    // at the target, before it bubbles. The pane's own double-click keeps zooming.
-    e.stopPropagation();
-    node.onOpen?.(info.id);
-  }}
   aria-pressed={node.selected}
   title={(info.origin
     ? `${info.label} — navigates, but no screen reaches it within the walk. In ${info.sub}.`
     : `${info.label} — rendered by ${info.sub}${info.entry ? '. The entry screen.' : ''}${
         info.unreached ? '. No transition in the graph reaches it from the entry.' : ''
-      }`) + (node.onOpen ? ' Double-click for what happens here.' : '')}
+      }`)}
 >
   <span class="name">{#if info.entry}<span class="mark" aria-hidden="true">●</span>{/if}{info.label}</span>
   <span class="sub">{info.sub}</span>
 </button>
 
 {#each layout.ports.bottom as port, i (`${port.type}:${port.id}`)}
-  <Handle
+  <Handle aria-hidden="true" tabindex={-1} role="presentation"
     type={port.type}
     id={`${port.type === 'source' ? 's' : 't'}:${port.id}`}
     position={Position.Bottom}
