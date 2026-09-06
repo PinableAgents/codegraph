@@ -158,6 +158,7 @@
     padding: 5px 10px;
     color: var(--ink-2);
     border-bottom: 2px solid transparent;
+    white-space: nowrap;
   }
 
   .views a:hover {
@@ -184,8 +185,11 @@
   }
 
   .project {
+    min-width: 0;
+    overflow: hidden;
     color: var(--ink-2);
     font-size: 12px;
+    text-overflow: ellipsis;
     white-space: nowrap;
   }
 
