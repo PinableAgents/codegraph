@@ -2,11 +2,14 @@
   import { i18n } from '../lib/i18n.svelte';
   import { project } from '../lib/project.svelte';
   import { mapHref, stepsHref, entryHref, deadHref } from '../lib/navigation';
+  import QuickStart from './QuickStart.svelte';
+  let { onsearch }: { onsearch: () => void } = $props();
 </script>
 <section>
   <div class="eyebrow">{i18n.t('wb.overview')}</div><h1>{project.name ?? i18n.t('wb.projectLoading')}</h1>
   {#if project.error}<p role="alert">{project.error}</p>{/if}
   <p>{i18n.t('wb.projectIntro')}</p>
+  <QuickStart {onsearch} />
   {#if project.stats}<div class="stats"><article><strong>{project.stats.graph.files.toLocaleString()}</strong><span>{i18n.t('wb.files')}</span></article><article><strong>{project.stats.graph.nodes.toLocaleString()}</strong><span>{i18n.t('wb.nodes')}</span></article><article><strong>{project.stats.graph.edges.toLocaleString()}</strong><span>{i18n.t('wb.edges')}</span></article></div>{/if}
   <div class="entries"><a href={mapHref()}><h2>{i18n.t('wb.map')} →</h2><p>{i18n.t('wb.mapHint')}</p></a><a href={stepsHref()}><h2>{i18n.t('wb.execution')} →</h2><p>{i18n.t('wb.executionHint')}</p></a><a href={entryHref()}><h2>{i18n.t('wb.reading')} →</h2><p>{i18n.t('wb.readingHint')}</p></a><a href={deadHref()}><h2>{i18n.t('wb.dead')} →</h2><p>{i18n.t('wb.deadHint')}</p></a></div>
 </section>

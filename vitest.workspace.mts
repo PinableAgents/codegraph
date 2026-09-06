@@ -36,6 +36,7 @@ export default defineWorkspace([
         '__tests__/ui-package.test.ts',
         '__tests__/ui-i18n.test.ts',
         '__tests__/ui-theme-preference.test.ts',
+        '__tests__/ui-guide.test.ts',
       ],
     },
   },
@@ -58,6 +59,7 @@ export default defineWorkspace([
         '__tests__/ui-package.test.ts',
         '__tests__/ui-i18n.test.ts',
         '__tests__/ui-theme-preference.test.ts',
+        '__tests__/ui-guide.test.ts',
       ],
       environment: 'jsdom',
       server: {

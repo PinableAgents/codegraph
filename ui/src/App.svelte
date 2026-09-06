@@ -7,6 +7,9 @@
   import TopBar from './components/TopBar.svelte';
   import TrailBar from './components/TrailBar.svelte';
   import ProjectOverview from './components/ProjectOverview.svelte';
+  import HelpDialog from './components/HelpDialog.svelte';
+  import ViewHelp from './components/ViewHelp.svelte';
+  import { guide } from './lib/guide.svelte';
   import SymbolView from './views/SymbolView.svelte';
   import FileView from './views/FileView.svelte';
   import FileCodeView from './views/FileCodeView.svelte';
@@ -80,6 +83,13 @@
   });
 
   let topbar: TopBar | null = $state(null);
+  let helpOpen = $state(false);
+
+  function startGuide() {
+    guide.setDismissed(false);
+    helpOpen = false;
+    navigate(selectedProject?.available ? projectHome : '#/workspace');
+  }
 
   let route = $derived(router.route);
 
@@ -122,7 +132,7 @@
   }
 
   function onkeydown(event: KeyboardEvent) {
-    if (event.defaultPrevented) return;
+    if (event.defaultPrevented || helpOpen) return;
 
     // Cmd/Ctrl+K reaches the search box even from inside another field.
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
@@ -170,7 +180,8 @@
 
 <svelte:window {onkeydown} />
 
-<TopBar bind:this={topbar} project={project.name} stats={project.summary} showScreens={hasScreens} />
+<TopBar bind:this={topbar} project={project.name} stats={project.summary} showScreens={hasScreens} onhelp={() => helpOpen = true} />
+{#if helpOpen}<HelpDialog onclose={() => helpOpen = false} onstart={startGuide} hasProject={!!selectedProject?.available} />{/if}
 <div class="workbench" class:collapsed>
   <aside aria-label={i18n.t('wb.nav')}>
     <button class="collapse" onclick={() => collapsed = !collapsed} aria-label={i18n.t('wb.collapse')} aria-expanded={!collapsed}>☰ <span>{i18n.t('wb.nav')}</span></button>
@@ -192,6 +203,7 @@
   {:else if !selectedProject?.available}<div class="loading" role="alert">{workspace.error ?? selectedProject?.error ?? i18n.t('wb.missing')} <button data-workspace-retry disabled={workspace.loading} onclick={() => workspace.reload()}>{i18n.t(workspace.loading ? 'wb.reloading' : 'wb.retryWorkspace')}</button> <a href="#/workspace">{i18n.t('wb.back')}</a></div>
   {:else}
 <TrailBar />
+<ViewHelp view={route.view} />
 <main use:localize>
   {#key router.location.raw}
   {#if route.view === 'symbol'}
@@ -220,7 +232,7 @@
   {:else if route.view === 'unknown'}
     <NotFoundView path={route.path} />
   {:else}
-    <ProjectOverview />
+    <ProjectOverview onsearch={() => topbar?.focusSearch()} />
   {/if}
   {/key}
 </main>
