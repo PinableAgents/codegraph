@@ -56,12 +56,16 @@ export const workspace = {
   activate(id: string | null) {
     if (id === activeId) return;
     controller?.abort(); live.stop();
-    graphStatus.resetProject(); project.resetProject(); palette.resetProject(); trail.resetProject(); trails.resetProject();
+    const selected = id ? projects.find(item => item.id === id) : undefined;
+    graphStatus.resetProject(); project.resetProject(selected?.stats); palette.resetProject(); trail.resetProject(); trails.resetProject();
     hot.clear(null); railFocus.reset(); toast.clear();
     activeId = id;
     if (!id) return;
     controller = new AbortController();
-    setGraphAdapter(createHttpAdapter({ apiBase: standalone ? undefined : `/api/projects/${encodeURIComponent(id)}`, signal: controller.signal }));
+    setGraphAdapter(createHttpAdapter({
+      apiBase: standalone ? undefined : `/api/projects/${encodeURIComponent(id)}`,
+      signal: controller.signal,
+    }));
     setNavigationDriver(createProjectNavigation(id));
     void project.ensure(); live.start();
   },

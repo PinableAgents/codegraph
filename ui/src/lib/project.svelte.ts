@@ -36,7 +36,12 @@ function load(): Promise<void> {
 }
 
 export const project = {
-  resetProject(): void { projectEpoch++; readGeneration++; stats = null; error = null; inflight = null; },
+  resetProject(initial?: WireStats): void {
+    projectEpoch++; readGeneration++; stats = initial ?? null; error = null;
+    // 工作区概览已经读取过同一版本的摘要。把它作为本项目第一次读取，
+    // 避免项目激活后立刻重复扫描百万级索引；索引事件仍会走 reload。
+    inflight = initial ? Promise.resolve() : null;
+  },
   get stats(): WireStats | null {
     return stats;
   },

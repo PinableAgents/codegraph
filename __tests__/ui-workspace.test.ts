@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { EventEmitter } from 'events';
 import { loadWorkspaceConfig } from '../src/ui-server/workspace/config';
-import { WorkspacePool } from '../src/ui-server/workspace/pool';
+import { WorkspacePool, workspaceTimeoutMs } from '../src/ui-server/workspace/pool';
 
 class FakeWorker extends EventEmitter {
   messages: any[] = [];
@@ -14,6 +14,14 @@ class FakeWorker extends EventEmitter {
 }
 
 describe('工作区配置与查询预算', () => {
+  it('摘要统计使用独立冷启动预算，普通查询仍保持短截止时间', () => {
+    expect(workspaceTimeoutMs('/api/stats', 'summary=1', {})).toBe(120_000);
+    expect(workspaceTimeoutMs('/api/stats', '', {})).toBe(3_000);
+    expect(workspaceTimeoutMs('/api/search', 'q=a', {})).toBe(3_000);
+    expect(workspaceTimeoutMs('/api/stats', 'summary=1', { timeoutMs: 25 })).toBe(25);
+    expect(workspaceTimeoutMs('/api/stats', 'summary=1', { timeoutMs: 25, statusTimeoutMs: 80 })).toBe(80);
+  });
+
   it('相对配置目录解析真实目录，允许未索引项目并拒绝重复编号', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cg-workspace-'));
     try {
@@ -78,6 +86,7 @@ describe('工作区真实 HTTP 与线程', () => {
       expect(overview.projects.map((p: any) => p.available)).toEqual([true, true, false]);
       const scoped = await fetch(`${server.url}/api/projects/one/stats`).then(r => r.json());
       expect(scoped.projectId).toBe('one');
+      expect(scoped.blastScale.sampled).toBe(0);
       expect(scoped.revision).toMatch(/^[a-f0-9]{24}$/);
       expect(scoped.scope.route).toBe('/api/stats');
       expect((await fetch(`${server.url}/api/projects/offline/stats`)).status).toBe(503);

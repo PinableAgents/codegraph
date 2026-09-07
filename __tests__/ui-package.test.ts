@@ -771,6 +771,20 @@ describe('工作区路由与请求隔离', () => {
     project.resetProject();
     setGraphAdapter(null);
   });
+  it('项目切换复用工作区摘要，不重复请求完整统计', async () => {
+    const { project } = await import('../ui/src/lib/project.svelte');
+    const { setGraphAdapter } = await import('../ui/src/lib/adapter');
+    const stats = { project: { name: '大型项目' }, graph: { nodes: 1_632_270, edges: 3_124_664, files: 65_791 } } as never;
+    const fetch = vi.fn();
+    setGraphAdapter({ stats: fetch } as never);
+    project.resetProject(stats);
+    await project.ensure();
+    expect(project.name).toBe('大型项目');
+    expect(project.stats).toEqual(stats);
+    expect(fetch).not.toHaveBeenCalled();
+    project.resetProject();
+    setGraphAdapter(null);
+  });
 });
 
 it('搜索返回恢复查询、项目范围和结果滚动', async () => {

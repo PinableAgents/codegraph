@@ -101,6 +101,10 @@ export function createWorkspaceApi(options: { workspace: WorkspaceConfig; readOn
         finally { if (!streaming || res.writableEnded) lease.release(); }
       }
       const query = new URLSearchParams(ctx.query);
+      // 工作区顶栏只需要计数和索引状态。完整 stats 还会对 24 个候选
+      // 做深度影响遍历，在百万级图上可能耗时数分钟；单项目模式仍保留
+      // 完整标尺，工作区则使用同形状的轻量摘要。
+      if (route === '/api/stats') query.set('summary', '1');
       if (['/api/map', '/api/screens', '/api/steps', '/api/flow'].includes(route)) query.set('bounded', '1');
       query.sort();
       const revision = workbenchRevision(root);

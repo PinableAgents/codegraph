@@ -11,7 +11,28 @@ interface Job {
   resolve: (reply: WorkspaceReply) => void; reject: (error: Error) => void;
   timer?: NodeJS.Timeout; cleanup?: () => void;
 }
-export interface WorkspacePoolOptions { size?: number; timeoutMs?: number; readOnly?: boolean; createWorker?: () => PoolWorker }
+export interface WorkspacePoolOptions {
+  size?: number;
+  /** 普通交互查询的排队加执行预算；默认 3 秒。 */
+  timeoutMs?: number;
+  /**
+   * 首次摘要统计还承担打开、迁移和修复大型索引的预热工作，不能使用
+   * 交互查询的短预算。显式 timeoutMs 仍作为兼容回退，便于调用方统一覆盖。
+   */
+  statusTimeoutMs?: number;
+  readOnly?: boolean;
+  createWorker?: () => PoolWorker;
+}
+
+const DEFAULT_QUERY_TIMEOUT_MS = 3_000;
+const DEFAULT_STATUS_TIMEOUT_MS = 120_000;
+
+/** 摘要统计是工作区可用性探测，也是每个项目 worker 的冷启动入口。 */
+export function workspaceTimeoutMs(route: string, query: string, options: WorkspacePoolOptions): number {
+  const summaryStats = route === '/api/stats' && new URLSearchParams(query).get('summary') === '1';
+  if (summaryStats) return options.statusTimeoutMs ?? options.timeoutMs ?? DEFAULT_STATUS_TIMEOUT_MS;
+  return options.timeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS;
+}
 
 /** 每项预算从入队开始，取消必须终止线程，避免 SQLite 查询继续消耗 CPU。 */
 export class WorkspacePool {
@@ -29,7 +50,10 @@ export class WorkspacePool {
       const abort = () => this.cancel(job, '查询已取消。');
       signal?.addEventListener('abort', abort, { once: true });
       job.cleanup = () => { clearTimeout(job.timer); signal?.removeEventListener('abort', abort); };
-      job.timer = setTimeout(() => this.cancel(job, new WorkspaceTimeoutError('查询超时，请缩小查询范围。')), this.options.timeoutMs ?? 3000);
+      job.timer = setTimeout(
+        () => this.cancel(job, new WorkspaceTimeoutError('查询超时，请缩小查询范围。')),
+        workspaceTimeoutMs(route, query, this.options)
+      );
       this.queue.push(job);
       this.pump();
     });
