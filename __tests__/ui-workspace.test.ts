@@ -14,12 +14,15 @@ class FakeWorker extends EventEmitter {
 }
 
 describe('工作区配置与查询预算', () => {
-  it('摘要统计使用独立冷启动预算，普通查询仍保持短截止时间', () => {
+  it('摘要统计和架构图使用独立预算，普通查询仍保持短截止时间', () => {
     expect(workspaceTimeoutMs('/api/stats', 'summary=1', {})).toBe(120_000);
+    expect(workspaceTimeoutMs('/api/map', 'bounded=1', {})).toBe(120_000);
     expect(workspaceTimeoutMs('/api/stats', '', {})).toBe(3_000);
     expect(workspaceTimeoutMs('/api/search', 'q=a', {})).toBe(3_000);
     expect(workspaceTimeoutMs('/api/stats', 'summary=1', { timeoutMs: 25 })).toBe(25);
     expect(workspaceTimeoutMs('/api/stats', 'summary=1', { timeoutMs: 25, statusTimeoutMs: 80 })).toBe(80);
+    expect(workspaceTimeoutMs('/api/map', '', { timeoutMs: 25 })).toBe(25);
+    expect(workspaceTimeoutMs('/api/map', '', { timeoutMs: 25, mapTimeoutMs: 80 })).toBe(80);
   });
 
   it('相对配置目录解析真实目录，允许未索引项目并拒绝重复编号', () => {

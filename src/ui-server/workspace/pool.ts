@@ -15,6 +15,8 @@ export interface WorkspacePoolOptions {
   size?: number;
   /** 普通交互查询的排队加执行预算；默认 3 秒。 */
   timeoutMs?: number;
+  /** 架构图需要扫描并聚合项目关系，使用独立预算；默认 120 秒。 */
+  mapTimeoutMs?: number;
   /**
    * 首次摘要统计还承担打开、迁移和修复大型索引的预热工作，不能使用
    * 交互查询的短预算。显式 timeoutMs 仍作为兼容回退，便于调用方统一覆盖。
@@ -26,11 +28,13 @@ export interface WorkspacePoolOptions {
 
 const DEFAULT_QUERY_TIMEOUT_MS = 3_000;
 const DEFAULT_STATUS_TIMEOUT_MS = 120_000;
+const DEFAULT_MAP_TIMEOUT_MS = 120_000;
 
-/** 摘要统计是工作区可用性探测，也是每个项目 worker 的冷启动入口。 */
+/** 摘要统计和架构图都是全项目查询，不能套用普通交互请求的短预算。 */
 export function workspaceTimeoutMs(route: string, query: string, options: WorkspacePoolOptions): number {
   const summaryStats = route === '/api/stats' && new URLSearchParams(query).get('summary') === '1';
   if (summaryStats) return options.statusTimeoutMs ?? options.timeoutMs ?? DEFAULT_STATUS_TIMEOUT_MS;
+  if (route === '/api/map') return options.mapTimeoutMs ?? options.timeoutMs ?? DEFAULT_MAP_TIMEOUT_MS;
   return options.timeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS;
 }
 
