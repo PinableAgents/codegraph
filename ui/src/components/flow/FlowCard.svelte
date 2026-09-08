@@ -2,7 +2,7 @@
   One hop of a flow: the symbol, where it lives, and the seven lines around the
   call that carries the reader to the next card (design spec §3.5).
 
-  The card is a Svelte Flow node, but nothing about it is Svelte Flow's: the
+  The card is a G6 node, but nothing about it is G6's: the
   handles are hidden ports at the vertical middle of each side, the position
   came from `buildFlowLayout`, and the height is the one that layout computed —
   pinned here so the arrows land where the arithmetic said they would.
@@ -14,7 +14,6 @@
   neither a gutter worth reading nor anything to fold.
 -->
 <script lang="ts">
-  import { Handle, Position } from '@xyflow/svelte';
   import KindGlyph from '../KindGlyph.svelte';
   import { tokenClass, tokensByLine, type Token } from '../../lib/highlight';
   import { assignRefs, basename, type LineRef } from '../../lib/symbol-model';
@@ -89,8 +88,6 @@
   class:dim={data.dimmed}
   style={`width:${card.width}px;height:${card.height}px`}
 >
-  <Handle aria-hidden="true" tabindex={-1} role="presentation" type="target" position={Position.Left} id="in" isConnectable={false} />
-  <Handle aria-hidden="true" tabindex={-1} role="presentation" type="source" position={Position.Right} id="out" isConnectable={false} />
 
   <button type="button" class="head" onclick={() => data.onOpen(card)}>
     <KindGlyph kind={hop.node.kind} />
@@ -137,30 +134,13 @@
     transition: border-color 150ms ease, box-shadow 150ms ease, opacity 150ms ease;
   }
 
-  .card::before {
-    content: '';
-    position: absolute;
-    left: -1px;
-    top: 50%;
-    z-index: 2;
-    width: 8px;
-    height: 8px;
-    border: 2px solid var(--route-branch);
-    border-radius: 50% !important;
-    background: var(--paper);
-    transform: translateY(-50%);
-    transition: border-color 150ms ease, background 150ms ease;
-  }
+
 
   .card:hover {
     border-color: var(--route-main);
   }
 
-  .card:hover::before,
-  .card.cur::before {
-    border-color: var(--route-main);
-    background: var(--route-main);
-  }
+
 
   .card.cur {
     border-color: var(--route-main);

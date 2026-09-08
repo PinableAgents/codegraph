@@ -1,4 +1,3 @@
-import { adoptUserNodes, Position } from '@xyflow/system';
 import { describe, expect, it, vi } from 'vitest';
 import { buildMapLayout, isEdgeVisible, portPoint } from '../ui/src/lib/map-model';
 import { mapSvg } from '../ui/src/lib/export-svg';
@@ -12,25 +11,14 @@ function fixture() {
 }
 
 describe('Map布局索引和展示缓存', () => {
-  it('400节点首次选择更换390个对象后尺寸和Handle边界仍初始化', () => {
-    const source = Array.from({ length: 400 }, (_, i) => ({ id: String(i), width: 180, height: 40 }));
-    const present = cachedPresentation((node: typeof source[number], flags: string) => ({ id: node.id, position: { x: Number(node.id) * 200, y: 0 }, data: { flags }, ...mapNodeMeasurements(node) }));
-    const before = source.map(node => present(node, '00'));
-    const lookup = new Map(); const parents = new Map();
-    expect(adoptUserNodes(before, lookup, parents, { checkEquality: true }).nodesInitialized).toBe(true);
-    const priorBounds = new Map([...lookup].map(([id, node]) => [id, structuredClone(node.internals.handleBounds)]));
-    const after = source.map((node, i) => present(node, i === 200 ? '10' : i >= 195 && i <= 205 ? '00' : '01'));
-    expect(after.filter((node, i) => node !== before[i])).toHaveLength(390);
-    expect(adoptUserNodes(after, lookup, parents, { checkEquality: true }).nodesInitialized).toBe(true);
-    for (const node of lookup.values()) {
-      expect(node.measured).toEqual({ width: 180, height: 40 });
-      expect(node.internals.handleBounds).toEqual(priorBounds.get(node.id));
-      const sourceHandle = node.internals.handleBounds.source[0];
-      const targetHandle = node.internals.handleBounds.target[0];
-      expect([sourceHandle.x + .5, sourceHandle.y + .5, sourceHandle.position]).toEqual([90, 40, Position.Bottom]);
-      expect([targetHandle.x + .5, targetHandle.y + .5, targetHandle.position]).toEqual([90, 0, Position.Top]);
-    }
-  });
+  it('400节点选择变化保留布局尺寸和位置', () => {
+  const source = Array.from({ length: 400 }, (_, i) => ({ id: String(i), width: 180, height: 40 }));
+  const present = cachedPresentation((node: typeof source[number], flags: string) => ({ id: node.id, position: { x: Number(node.id) * 200, y: 0 }, data: { flags }, ...mapNodeMeasurements(node) }));
+  const before = source.map(node => present(node, '00'));
+  const after = source.map((node, i) => present(node, i === 200 ? '10' : i >= 195 && i <= 205 ? '00' : '01'));
+  expect(after.filter((node, i) => node !== before[i])).toHaveLength(390);
+  for (const [i, node] of after.entries()) { expect(node.measured).toEqual({ width: 180, height: 40 }); expect(node.position).toEqual(before[i]!.position); }
+});
   it('节点和一跳入出关系可直接定位，不扩展第二跳', () => {
     const layout = fixture();
     const index = buildMapIndex(layout);

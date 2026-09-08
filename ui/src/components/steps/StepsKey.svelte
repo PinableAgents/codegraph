@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { graphText } from '../../lib/graph-copy';
   /**
    * The Steps view's key.
    *
@@ -145,8 +146,8 @@
           <span>Established by a synthesized hop (an event channel, a callback, a helper's return value)</span>
         </div>
         <div class="lrow">
-          <svg width="44" height="12" aria-hidden="true"><path d="M2 6 H42" class="k-line k-back" /></svg>
-          <span>Goes back up the picture — leaves the top of its box, arrives at the bottom of the other</span>
+          <svg width="44" height="12" aria-hidden="true"><path d="M2 6 H42" class="k-line" /></svg>
+          <span>{graphText('返回关系保留原有方向；循环分析使用真实有向关系', 'A return relationship keeps its direction; cycle analysis uses actual directed relationships')}</span>
         </div>
         <div class="lrow">
           <span class="k-label mono">x? · yes</span>
@@ -215,11 +216,6 @@
 }
 .k-line.k-synth {
   stroke-dasharray: 5 3;
-}
-.k-line.k-back {
-  stroke: var(--route-return);
-  stroke-opacity: 0.8;
-  stroke-dasharray: 4 3;
 }
 .k-label {
   font-size: 10.5px;

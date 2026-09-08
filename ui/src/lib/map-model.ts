@@ -165,6 +165,8 @@ export interface MapNodeLayout {
 }
 
 export interface MapEdgeLayout {
+  /** Bend points supplied by the architecture layout worker. */
+  controlPoints?: [number, number][];
   id: string;
   source: string;
   target: string;
@@ -273,7 +275,7 @@ export function strokeWidthFor(count: number): number {
 }
 
 /**
- * A link's stable identity, and the id Svelte Flow keys its edge on.
+ * A link's stable identity, and the id G6 keys its edge on.
  *
  * NUL is the separator because a module id is a path and a path may contain
  * anything else — including the spaces, arrows and colons that read nicer.

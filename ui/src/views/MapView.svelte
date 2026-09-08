@@ -11,16 +11,14 @@
   import { graphText } from '../lib/graph-copy';
   import DetailPanel from '../components/graph/DetailPanel.svelte';
   import { untrack } from 'svelte';
-  import CanvasTools from '../components/graph/CanvasTools.svelte';
   import { graphBudget } from '../lib/graph-budget';
-  import { buildMapIndex, indexedOneHop, cachedPresentation, mapNodeMeasurements, positionedMapPoints, positionedMapLayout } from '../lib/map-index';
+  import { buildMapIndex, indexedOneHop, cachedPresentation, mapNodeMeasurements, positionedMapPoints } from '../lib/map-index';
   import { requestLayout } from '../lib/graph-layout';
-  import { SvelteFlow, Controls, ViewportPortal, type Node, type Edge } from '@xyflow/svelte';
-  import '@xyflow/svelte/dist/style.css';
-  import ModuleNode from '../components/map/ModuleNode.svelte';
-  import ModuleEdge from '../components/map/ModuleEdge.svelte';
+  import GraphCanvas from '../components/graph/GraphCanvas.svelte';
+  import { graphScene } from '../lib/graph-adapters';
+  import type { Node, Edge, GraphController } from '../lib/graph-scene';
   import MapSidePanel from '../components/map/MapSidePanel.svelte';
-  import { exportFilename, mapSvg } from '../lib/export-svg';
+  import { exportFilename } from '../lib/export-svg';
   import { fetchMap, type WireMapPayload } from '../lib/api';
   import { live } from '../lib/live.svelte';
   import { mapHref, navigate, fileHref } from '../lib/navigation';
@@ -38,6 +36,7 @@
 
   let { root, depth, tests }: Props = $props();
 
+  let visibleCounts = $state<{nodes:number;edges:number}|null>(null);
   let payload = $state<WireMapPayload | null>(null);
   let retry = $state(0);
   let error = $state<string | null>(null);
@@ -55,10 +54,7 @@
    * hair, not a map. Below this floor the view opens part-way and the reader
    * pans, which is the honest trade.
    */
-  const FIT = { fitViewOptions: { padding: 0.12, maxZoom: 1, minZoom: 0.05 } };
 
-  const nodeTypes = { module: ModuleNode };
-  const edgeTypes = { module: ModuleEdge };
 
   let minWeight = $state(1);
   let debouncedWeight = $state(1);
@@ -104,7 +100,6 @@
   let locate = $state<{ id: string } | null>(null);
   let layout = $state<MapLayout | null>(null);
   let positions = $state<Record<string, { x: number; y: number }>>({});
-  let dragging = $state(false);
   let flowPlaying = $state(false);
   let edgeStyle = $state<MapEdgeStyle>('curve');
   let fitRequest = $state<object | null>(null);
@@ -140,13 +135,13 @@
       id: edge.id, source: edge.source, target: edge.target,
       sourceHandle: 'out', targetHandle: 'in',
       type: 'module', selectable: false, deletable: false,
-      data: { edge, points: positionedMapPoints(currentIndex!, edge, livePositions), hot: flags[0] === '1', flowing: flags[1] === '1', edgeStyle, dimmed: false, onHover: onEdgeHover },
+      data: { edge: manuallyPlaced ? { ...edge, controlPoints: undefined } : edge, points: positionedMapPoints(currentIndex!, edge, livePositions), hot: flags[0] === '1', flowing: flags[1] === '1', edgeStyle, dimmed: false, onHover: onEdgeHover },
     }));
   });
   let nodes = $state.raw<Node[]>([]);
   // 位置通过双向绑定接收绘图库的拖动更新，不重新运行布局 Worker。
   $effect(() => {
-    nodes = !layout ? [] : layout.nodes.filter(node => !focusOnly || !neighbours || neighbours.has(node.id)).map(node => {
+    nodes = !layout ? [] : layout.nodes.map(node => {
       const position = positions[node.id] ?? { x: node.x, y: node.y };
       return nodePresentation(node, `${selected === node.id ? 1 : 0}${neighbours !== null && !neighbours.has(node.id) ? 1 : 0}:${position.x},${position.y}`);
     });
@@ -157,20 +152,17 @@
     compactRequest = null;
     if (position) positions = { ...positions, [id]: { x: position.x + dx, y: position.y + dy } };
   }
-  function finishDrag(moved: Node[]): void {
-    positions = { ...positions, ...Object.fromEntries(moved.map(node => [node.id, { ...node.position }])) };
-    dragging = false;
-  }
+
   const visibleEdges = $derived.by(() => {
     if (!index) return [];
-    const candidates = selected === null ? index.atRest : index.incident.get(selected) ?? [];
-    return candidates.filter(edge => !focusOnly || !neighbours || (neighbours.has(edge.source) && neighbours.has(edge.target)));
+    const candidates = layout?.edges.filter(edge => !edge.thin) ?? [];
+    return candidates;
   });
   // 鼠标在同一条边内移动只更新提示位置，不使画布对象失效。
   const hoveredEdgeId = $derived(hovered?.edge.id ?? null);
   const edges = $derived(visibleEdges.map((edge, i) => {
     const points = positionedMapPoints(index!, edge, livePositions);
-    const hot = hoveredEdgeId === edge.id || (selected !== null && !edge.back);
+    const hot = hoveredEdgeId === edge.id;
     return edgePresentation(edge, `${hot ? 1 : 0}${flowPlaying && i < 200 ? 1 : 0}:${edgeStyle}:${points.source.x},${points.source.y},${points.target.x},${points.target.y}`);
   }));
   const selectedFiles = $derived(selected ? index?.nodeById.get(selected)?.module.fileList.items ?? [] : []);
@@ -180,8 +172,8 @@
     hovered = null;
     compactRequest = { layout, direction: focusDirection, input: {
       selected,
-      nodes: nodes.map(node => { const original = index!.nodeById.get(node.id)!; return { id: node.id, width: original.width, height: original.height }; }),
-      edges: visibleEdges.map(edge => ({ source: edge.source, target: edge.target })),
+      nodes: nodes.filter(node => neighbours?.has(node.id)).map(node => { const original = index!.nodeById.get(node.id)!; return { id: node.id, width: original.width, height: original.height }; }),
+      edges: visibleEdges.filter(edge => neighbours?.has(edge.source) && neighbours.has(edge.target)).map(edge => ({ source: edge.source, target: edge.target })),
     } };
   }
   $effect(() => {
@@ -227,19 +219,7 @@
    * a forty-module map is a wide, mostly-empty drawing that scales, and GitHub
    * renders SVG in a README.
    */
-  function buildSvg(scale: number): string {
-    if (layout === null) throw new Error('There is no map to export yet.');
-    const root = payload?.root ?? '';
-    const placed = positionedMapLayout(layout, new Map([...Object.entries(positions), ...livePositions]));
-    const exported = focusOnly && neighbours ? { ...placed, nodes: placed.nodes.filter(n => neighbours.has(n.id)), edges: placed.edges.filter(e => neighbours.has(e.source) && neighbours.has(e.target)) } : placed;
-    return mapSvg(exported, {
-      focused: neighbours,
-      edgeStyle,
-      scale,
-      selected,
-      caption: `${graphText('测试', 'Tests')}=${tests} · ${graphText('最小权重', 'Min weight')}=${minWeight} · ${graphText('聚焦', 'Focus')}=${focusOnly ? focusDirection : '-'} · ${root || 'the project'} · ${exported.nodes.length} modules${selected ? ` · ${selected} selected` : ''}`,
-    });
-  }
+
 
   function setTests(next: boolean): void {
     selected = null;
@@ -264,10 +244,16 @@
 
   $effect(() => {
     if (!payload) return;
-    return graphStatus.set({ nodes: nodes.length, edges: edges.length, scope: payload.root || graphText('整个项目', 'Whole project'), filter: `${tests ? graphText('包含测试模块', 'Include test modules') : graphText('隐藏测试模块', 'Hide test modules')} · ${graphText('权重', 'Weight')} ≥ ${minWeight}${focusOnly ? ` · ${focusDirection === 'in' ? graphText('上游', 'Incoming') : focusDirection === 'out' ? graphText('下游', 'Outgoing') : graphText('双向', 'Both directions')}` : ''}`, excluded: `${payload.excluded.uncertainEdges} ${graphText('不确定关系已排除', 'uncertain relationships excluded')}`,
+    return graphStatus.set({ nodes: visibleCounts?.nodes ?? nodes.length, edges: visibleCounts?.edges ?? edges.length, scope: payload.root || graphText('整个项目', 'Whole project'), filter: `${tests ? graphText('包含测试模块', 'Include test modules') : graphText('隐藏测试模块', 'Hide test modules')} · ${graphText('权重', 'Weight')} ≥ ${minWeight}${focusOnly ? ` · ${focusDirection === 'in' ? graphText('上游', 'Incoming') : focusDirection === 'out' ? graphText('下游', 'Outgoing') : graphText('双向', 'Both directions')}` : ''}`, excluded: `${payload.excluded.uncertainEdges} ${graphText('不确定关系已排除', 'uncertain relationships excluded')}`,
       budget: budget?.exceeded ? graphText('超过画布预算，请缩小范围', 'Canvas budget exceeded; narrow scope') : '400 / 2000',
     });
   });
+  let graphController = $state.raw<GraphController | null>(null);
+  const canvasScene = $derived(graphScene('map', nodes, edges));
+  function buildSvg(scale: number): string {
+    if (!graphController) throw new Error('Graph is not ready');
+    return graphController.exportSvg(scale);
+  }
 </script>
 
 <div class="graph-shell">
@@ -280,14 +266,12 @@
   {#if selectedTarget?.kind === 'file'}<a href={fileHref(selectedTarget.path)}>{graphText('打开门面文件', 'Open facade file')}</a>{:else}<button disabled={selectedTarget?.kind !== 'directory'} onclick={() => selectedTarget?.kind === 'directory' && setRoot(selectedTarget.path)}>{graphText('下钻选中目录', 'Drill into selection')}</button>{/if}
   <label>{graphText('一跳方向', 'One-hop direction')} <select bind:value={focusDirection}><option value="both">{graphText('双向', 'Both')}</option><option value="in">{graphText('上游', 'Incoming')}</option><option value="out">{graphText('下游', 'Outgoing')}</option></select></label>
   <label><input type="checkbox" bind:checked={focusOnly} />{graphText('只看聚焦', 'Focus only')}</label>
-  <label>{graphText('连线', 'Edges')} <select aria-label={graphText('连线样式', 'Edge style')} bind:value={edgeStyle}><option value="curve">{graphText('曲线', 'Curved')}</option><option value="straight">{graphText('直线', 'Straight')}</option></select></label>
+  <label>{graphText('连线', 'Edges')} <select aria-label={graphText('连线样式', 'Edge style')} bind:value={edgeStyle}><option value="curve">{graphText('圆角折线', 'Rounded polyline')}</option><option value="straight">{graphText('直线', 'Straight')}</option></select></label>
   <button disabled={!focusOnly || !selected || !layout || !!compactRequest} title={graphText('选中节点并开启只看聚焦后，重新排列当前可见节点，缩短长距离连线。', 'Select a node and enable Focus only to arrange visible nodes closer together.')} onclick={compactVisible}>{compactRequest ? graphText('排列中…', 'Arranging…') : graphText('紧凑排列', 'Compact layout')}</button>
   <button disabled={!layout} aria-pressed={flowPlaying} onclick={() => flowPlaying = !flowPlaying}>{flowPlaying ? graphText('暂停流向', 'Pause flow') : graphText('播放流向', 'Play flow')}</button>
   <button disabled={!manuallyPlaced} onclick={() => { compactRequest = null; positions = {}; }}>{graphText('恢复自动布局', 'Reset layout')}</button>
-  {#if layout?.mutual.length}<select aria-label={graphText('定位循环依赖', 'Locate mutual dependency')} value="" onchange={e => { selected = e.currentTarget.value; locate = { id: selected }; }}><option value="">{graphText('循环依赖', 'Mutual dependencies')} ({layout.mutual.length})</option>{#each layout.mutual as pair}<option value={pair.back.source}>{pair.back.source} ⇄ {pair.back.target}</option>{/each}</select>{/if}
 </div>
 <p class="compact-note">{graphText('拖动节点整理链路；Alt + 方向键微调。箭头 A → B 表示 A 调用或依赖 B，动画不代表运行时数据。', 'Drag nodes to arrange links; use Alt + arrow keys to nudge. A → B means A calls or depends on B; animation does not represent runtime data.')} {manuallyPlaced ? graphText('当前为手动排列。', 'Manually arranged.') : graphText('当前为自动布局。', 'Automatic layout.')}{#if flowPlaying && visibleEdges.length > 200} {graphText('仅播放前 200 条关系；选中节点可聚焦局部流向。', 'Playing the first 200 relationships; select a node to focus the flow.')}{/if}</p>
-{#if layout?.compactCycles?.length}<p class="compact-note">{graphText('大型循环的自动布局使用网格；位置不表示环内执行顺序。使用定位选中或100%阅读节点。', 'Automatic layouts of large cycles use a grid; position does not imply execution order inside a cycle. Use Focus selection or 100% to read nodes.')}</p>{/if}
 <div class="mapview">
   <div class="mapstage" bind:this={stage}>
     {#if error && layout}<div class="retry-banner" role="alert">{error} <button onclick={() => retry++}>{graphText('重试', 'Retry')}</button></div>{/if}
@@ -311,55 +295,10 @@
         </p>
       </div>
     {:else if layout !== null}
-      <SvelteFlow
-        onlyRenderVisibleElements
-        bind:nodes
-        {edges}
-        {nodeTypes}
-        {edgeTypes}
-        fitView={!restored.viewport}
-        initialViewport={restored.viewport}
-        {...FIT}
-        minZoom={0.05}
-        maxZoom={1.6}
-        nodesDraggable
-        nodeDragThreshold={4}
-        onnodedragstart={() => { compactRequest = null; dragging = true; hovered = null; }}
-        onnodedragstop={({ nodes: moved }) => finishDrag(moved)}
-        nodesConnectable={false}
-        elementsSelectable={false}
-        panOnDrag
-        proOptions={{ hideAttribution: true }}
-        onpaneclick={() => {
-          selected = null;
-          hovered = null;
-        }}
-      >
-        <!-- The layer rules ride INSIDE the viewport, so they pan and zoom
-             with the boxes they explain. A layer line drawn on the frame
-             would sit next to the wrong row the moment anyone scrolled. -->
-        <ViewportPortal target="back">
-          {#each manuallyPlaced || dragging ? [] : layout.layers as row (row.index)}
-            <div
-              class="layerline"
-              style={`transform:translate(0px,${row.y}px);width:${layout.width}px`}
-            ></div>
-            {#if row.label !== null}
-              <!-- Above the top row, below the bottom one: both sit in the
-                   clear band outside the drawing rather than under the edge
-                   bundles, which is where a label stops being readable. -->
-              <div
-                class="layerlbl"
-                style={`transform:translate(8px,${row.index === 0 ? row.y + 40 : row.y - 36}px)`}
-              >
-                {row.label}
-              </div>
-            {/if}
-          {/each}
-        </ViewportPortal>
-        <CanvasTools items={layout.nodes.map(n => ({ id: n.id, label: n.module.label }))} {selected} {locate} {fitRequest} onSelect={(id) => selected = id} />
-        <Controls position="bottom-right" showLock={false} />
-      </SvelteFlow>
+      <GraphCanvas scene={canvasScene} onVisibleChange={counts=>visibleCounts=counts} {selected} {locate} {fitRequest} bind:controller={graphController} bind:direction={focusDirection} bind:focusOnly
+        onReset={()=>{compactRequest=null;positions={};}}
+        onSelect={id => { selected = id; hovered = null; }}
+        onMove={(id, x, y) => { compactRequest = null; positions = { ...positions, [id]: { x, y } }; }} />
 
       {#if hovered !== null}
         <div class="tip" style={`left:${hovered.x}px;top:${hovered.y}px`}>
@@ -432,58 +371,6 @@
       linear-gradient(var(--route-grid) 1px, transparent 1px),
       linear-gradient(90deg, var(--route-grid) 1px, transparent 1px);
     background-size: 24px 24px;
-  }
-  /* Svelte Flow paints its own surface and its own controls; both are
-     re-tokenised so the canvas belongs to the paper/ink system rather than
-     arriving with the library's blue-grey defaults. */
-  .mapstage :global(.svelte-flow) {
-    background-color: transparent;
-  }
-  .mapstage :global(.svelte-flow__handle) {
-    opacity: 0;
-    width: 1px;
-    height: 1px;
-    min-width: 0;
-    min-height: 0;
-    border: 0;
-    pointer-events: none;
-  }
-  .mapstage :global(.svelte-flow__controls-button) {
-    background: var(--paper-2);
-    border: 0;
-    border-bottom: 1px solid var(--rule-soft);
-    border-radius: 0;
-    box-shadow: none;
-    fill: var(--route-branch);
-  }
-  .mapstage :global(.svelte-flow__controls) {
-    box-shadow: none;
-    border: 1px solid var(--route-branch);
-  }
-  .mapstage :global(.svelte-flow__node) {
-    cursor: default;
-  }
-
-  .layerline {
-    position: absolute;
-    top: 0;
-    left: 0;
-    height: 1px;
-    background: var(--route-grid);
-    box-shadow: 0 12px 0 color-mix(in srgb, var(--route-band) 65%, transparent);
-    pointer-events: none;
-  }
-  .layerlbl {
-    position: absolute;
-    top: 0;
-    left: 0;
-    font: 12px var(--sans);
-    color: var(--ink-2);
-    padding: 2px 7px;
-    border-left: 3px solid var(--route-branch);
-    background: var(--paper-2);
-    white-space: nowrap;
-    pointer-events: none;
   }
 
   .state {

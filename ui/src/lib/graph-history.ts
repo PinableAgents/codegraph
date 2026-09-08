@@ -1,4 +1,8 @@
 export interface GraphHistory {
+  collapsedGroups?: string[];
+  grouping?: 'directory' | 'cycles';
+  analysisDirection?: 'in' | 'out' | 'both';
+  analysisFocus?: boolean;
   selected?: string | null;
   viewport?: { x: number; y: number; zoom: number };
   scroll?: number;

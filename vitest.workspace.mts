@@ -62,14 +62,6 @@ export default defineWorkspace([
         '__tests__/ui-guide.test.ts',
       ],
       environment: 'jsdom',
-      server: {
-        deps: {
-          // `@xyflow/svelte` ships uncompiled `.svelte` files, so it has to go
-          // through the plugin above rather than be externalised to Node,
-          // which has no idea what a `.svelte` file is.
-          inline: [/@xyflow\/svelte/],
-        },
-      },
     },
   },
 ]);

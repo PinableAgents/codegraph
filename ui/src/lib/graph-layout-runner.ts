@@ -5,8 +5,23 @@ import { buildScreensModel } from './screens-model';
 import { buildStepsModel } from './steps-model';
 import { buildOrderModel } from './program-model';
 import { buildFlowLayout } from './flow-model';
+import { routeScene } from './graph-routing';
 import type { WireMapPayload, WireScreensPayload, WireStepsPayload, WireFlow } from './wire';
+/** Rendering layout is async; the pure semantic builder remains reusable and testable. */
+export async function calculateRenderLayout(kind: string, payload: unknown, options: Record<string, unknown>) {
+  const result = calculateLayout(kind, payload, options);
+  if (kind === 'map') {
+    const { layoutArchitecture } = await import('./g6-layout');
+    return layoutArchitecture(result as import('./map-model').MapLayout);
+  }
+  return result;
+}
 export function calculateLayout(kind: string, payload: unknown, options: Record<string, unknown>) {
+  if (kind === 'scene-routes') {
+    const data = payload as { nodes: Parameters<typeof routeScene>[0]; edges: Parameters<typeof routeScene>[1] };
+    assertBudget(graphBudget(data.nodes.length, data.edges.length));
+    return routeScene(data.nodes, data.edges);
+  }
   if (kind === 'map-compact') {
     const data = payload as CompactMapInput;
     assertBudget(graphBudget(data.nodes.length, data.edges.length));

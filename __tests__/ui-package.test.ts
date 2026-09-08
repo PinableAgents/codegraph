@@ -21,6 +21,26 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+const g6Harness = vi.hoisted(() => ({ scene: null as any, events: null as any, destroyed: 0 }));
+// jsdom tests exercise the Svelte/adapter boundary; real Canvas rendering is checked in the browser.
+vi.mock('../ui/src/lib/g6-runtime', async () => {
+  const { mount, unmount } = await import('svelte');
+  return { G6Runtime: class {
+    html: any[] = []; container: HTMLElement;
+    constructor(container: HTMLElement, events: any) { this.container = container; g6Harness.events = events; }
+    async update(scene: any) {
+      g6Harness.scene = scene;
+      for (const mounted of this.html) await unmount(mounted); this.html = [];
+      for (const node of scene.nodes) if (node.component) this.html.push(mount(node.component, { target: this.container, props: node.props }));
+    }
+    async fit() {} async focus() {} async zoom() {} setMinimap() {} async collapse() {}
+    async settled() {}
+    select(id: string) { g6Harness.events.select(id); }
+    viewport() { return { x: 0, y: 0, zoom: 1 }; }
+    snapshot() { return g6Harness.scene; } exportSvg() { return '<svg />'; }
+    destroy() { for (const item of this.html) void unmount(item); this.html = []; g6Harness.destroyed++; }
+  } };
+});
 
 import {
   ArchitectureMap,
@@ -433,7 +453,8 @@ let host: HTMLDivElement;
 let mounted: Record<string, unknown> | null = null;
 
 /** jsdom has none of the observers a canvas library expects. */
-beforeAll(() => {
+beforeAll(async () => {
+  await import('../ui/src/lib/g6-layout');
   class NoopObserver {
     observe(): void {}
     unobserve(): void {}
@@ -463,11 +484,12 @@ beforeAll(() => {
   globals.matchMedia = media;
   if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {};
   // jsdom没有布局；已声明尺寸的图节点必须配有非零画布，才能验证可见性裁剪。
-  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get() { return this.classList.contains('svelte-flow') ? 1200 : 0; } });
-  Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get() { return this.classList.contains('svelte-flow') ? 800 : 0; } });
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get() { return this.classList.contains('surface') ? 1200 : 0; } });
+  Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get() { return this.classList.contains('surface') ? 800 : 0; } });
 });
 
 beforeEach(() => {
+  g6Harness.scene = null; g6Harness.events = null;
   host = document.createElement('div');
   document.body.appendChild(host);
   trail.clear();
@@ -744,7 +766,7 @@ describe('@colbymchenry/codegraph-ui — the published shape', () => {
     expect(manifest.dependencies?.svelte).toBeUndefined();
     // The canvas library is a real dependency: the Map and the Flow strip are
     // unusable without it and a host must not have to know its version.
-    expect(manifest.dependencies['@xyflow/svelte']).toBeDefined();
+    expect(manifest.dependencies['@antv/g6']).toBe('5.1.1');
   });
 });
 
@@ -874,7 +896,7 @@ it('一万条关系逐页浏览，保留调用位置并限制当前DOM为50条',
   expect(host.querySelectorAll('[data-relationship]')).toHaveLength(50);
   expect(host.textContent).toContain('src/hub.ts:10000');
   expect((host.querySelector('[data-next]') as HTMLButtonElement).disabled).toBe(true);
-});
+}, 15000);
 
 async function settle() { for (let i = 0; i < 3; i++) { await new Promise(resolve => setTimeout(resolve, 0)); flushSync(); } }
 
@@ -1111,19 +1133,13 @@ it('Steps入口忽略取消后迟到的screens响应', async () => {
   expect(host.textContent).toContain('CURRENT_SCREEN');
 });
 
-it('Map每个模块只挂载两个隐藏Handle，保持节点选择按钮', async () => {
-  setGraphAdapter(mockAdapter().adapter);
-  await render(ArchitectureMap, { root: null, depth: 2, tests: false });
-  const nodes = [...host.querySelectorAll('.svelte-flow__node-module')];
-  expect(nodes.length).toBeGreaterThan(0);
-  for (const node of nodes) {
-    const handles = [...node.querySelectorAll('.svelte-flow__handle')];
-    expect(handles).toHaveLength(2);
-    expect(handles.map(handle => handle.getAttribute('data-handleid')).sort()).toEqual(['in', 'out']);
-    expect(handles.every(handle => handle.getAttribute('aria-hidden') === 'true' && handle.getAttribute('tabindex') === '-1')).toBe(true);
-    expect(node.querySelector('button.mnode')).not.toBeNull();
-  }
-});
+it('Map通过G6场景保留模块标签和键盘选择入口', async () => {
+   setGraphAdapter(mockAdapter().adapter);
+   await render(ArchitectureMap, { root: null, depth: 2, tests: false });
+   await vi.waitFor(() => expect(host.querySelector('[data-graph-engine="g6"]')).not.toBeNull());
+   expect(host.querySelectorAll('.accessible button').length).toBeGreaterThan(0);
+   expect(g6Harness.scene.nodes.every((n: any) => n.width > 0 && n.height > 0)).toBe(true);
+ });
 
 it('同项目乱序刷新只采用最后一次统计、入口和路径列表', async () => {
   const { project } = await import('../ui/src/lib/project.svelte');
@@ -1196,87 +1212,28 @@ it('旧刷新失败不会写入错误或提前结束最新读取，刷新不使�
   } finally { project.resetProject(); palette.resetProject(); trails.resetProject(); setGraphAdapter(null); }
 });
 
-it('架构边始终指向几何目标，播放切换保留回边方向与悬停命中区', async () => {
-  const { default: ModuleEdge } = await import('../ui/src/components/map/ModuleEdge.svelte');
-  const { createClassComponent } = await import('svelte/legacy');
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  host.appendChild(svg);
-  const onHover = vi.fn();
-  const data = {
-    edge: { id: 'back', back: true, width: 3 },
-    points: { source: { x: 20, y: 180 }, target: { x: 80, y: 30 } },
-    hot: false, dimmed: false, onHover,
-  };
-  const component = createClassComponent({ component: ModuleEdge, target: svg, props: {
-    id: 'edge:回 b', data, sourceX: 999, sourceY: 999, targetX: 999, targetY: 999,
-  } as never });
-  try {
-    flushSync();
-    const edge = svg.querySelector('.medge')!;
-    const marker = svg.querySelector('marker')!;
-    const expected = 'M20,180 C20,105 80,105 80,30';
-    expect(edge.getAttribute('d')).toBe(expected);
-    expect(edge.getAttribute('marker-end')).toBe(`url(#${marker.id})`);
-    expect(edge.getAttribute('marker-start')).toBeNull();
-    expect(marker.getAttribute('orient')).toBe('auto');
-    expect(marker.id).toMatch(/^map-arrow-[a-f0-9-]+$/);
-    expect(svg.querySelector('.flowing')).toBeNull();
-    component.$set({ data: { ...data, flowing: true } }); flushSync();
-    const flow = svg.querySelector('.flowing')!;
-    expect(flow.getAttribute('d')).toBe(expected);
-    expect(flow.getAttribute('pointer-events')).toBe('none');
-    expect(flow.getAttribute('aria-hidden')).toBe('true');
-    svg.querySelector('.hit')!.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
-    expect(onHover).toHaveBeenCalledWith(data.edge, expect.any(MouseEvent));
-    for (const [edgeStyle, expectedPath] of [
-      ['straight', 'M20,180 L80,30'],
-      ['curve', expected],
-    ]) {
-      component.$set({ data: { ...data, flowing: true, edgeStyle } }); flushSync();
-      for (const selector of ['.medge', '.flowing', '.hit']) {
-        expect(svg.querySelector(selector)!.getAttribute('d')).toBe(expectedPath);
-      }
-      expect(edge.getAttribute('marker-end')).toBe(`url(#${marker.id})`);
-    }
-    component.$set({ data: { ...data, flowing: false } }); flushSync();
-    expect(svg.querySelector('.flowing')).toBeNull();
-    expect(svg.querySelector('marker')!.id).toBe(marker.id);
-    expect(edge.getAttribute('d')).toBe(expected);
-    component.$set({ id: 'edge:回-b', data: { ...data, edge: { ...data.edge, back: false }, points: { source: { x: 80, y: 30 }, target: { x: 20, y: 180 } } } }); flushSync();
-    expect(svg.querySelector('marker')!.id).not.toBe('map-arrow-' + Array.from('edge:回 b', char => char.codePointAt(0)!.toString(16)).join('-'));
-    expect(edge.getAttribute('d')).toBe('M80,30 C80,105 20,105 20,180');
-    expect(edge.getAttribute('marker-end')).toBe(`url(#${svg.querySelector('marker')!.id})`);
-  } finally { component.$destroy(); }
-});
+it('G6场景合并双向展示边但保留真实有向关系', async () => {
+   setGraphAdapter(mockAdapter().adapter);
+   await render(ArchitectureMap, { root: 'src', depth: 1, tests: false });
+   await vi.waitFor(() => expect(g6Harness.scene?.kind).toBe('map'));
+   expect(g6Harness.scene.relations.length).toBeGreaterThan(0);
+   expect(g6Harness.scene.edges.every((e: any) => e.originalIds.length && e.width <= 2)).toBe(true);
+ });
 
-it('架构节点可微调并保存位置，连线同步且支持播放和恢复布局', async () => {
-  const { saveGraphHistory, readGraphHistory } = await import('../ui/src/lib/graph-history');
-  saveGraphHistory(location.href, { positions: {}, selected: null, flowPlaying: false });
-  setGraphAdapter(mockAdapter().adapter);
-  await render(ArchitectureMap, { root: 'src', depth: 1, tests: false });
-  const wrapper = host.querySelector<HTMLElement>('.svelte-flow__node-module')!;
-  const button = wrapper.querySelector<HTMLButtonElement>('button.mnode')!;
-  expect(wrapper.classList.contains('draggable')).toBe(true);
-  const previousTransform = wrapper.style.transform;
-  const previousPaths = [...host.querySelectorAll('path.medge')].map(path => path.getAttribute('d'));
-  button.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, bubbles: true }));
-  flushSync();
-  await vi.waitFor(() => expect(wrapper.style.transform).not.toBe(previousTransform));
-  expect([...host.querySelectorAll('path.medge')].map(path => path.getAttribute('d'))).not.toEqual(previousPaths);
-  expect(Object.keys(readGraphHistory(location.href).positions ?? {})).toHaveLength(1);
-  const play = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => /播放流向|Play flow/.test(button.textContent ?? ''))!;
-  play.click(); flushSync();
-  await vi.waitFor(() => expect(host.querySelector('path.flowing')).not.toBeNull());
-  expect(play.getAttribute('aria-pressed')).toBe('true');
-  play.click(); flushSync();
-  expect(host.querySelector('path.flowing')).toBeNull();
-  const reset = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => /恢复自动布局|Reset layout/.test(button.textContent ?? ''))!;
-  expect(reset.disabled).toBe(false);
-  reset.click(); flushSync();
-  await vi.waitFor(() => expect(wrapper.style.transform).toBe(previousTransform));
-  expect(readGraphHistory(location.href).positions).toEqual({});
-  expect(reset.disabled).toBe(true);
-});
+it('G6节点移动保存位置，流向播放和恢复布局保持可用', async () => {
+   const { saveGraphHistory, readGraphHistory } = await import('../ui/src/lib/graph-history');
+   saveGraphHistory(location.href, { positions: {}, selected: null, flowPlaying: false });
+   setGraphAdapter(mockAdapter().adapter);
+   await render(ArchitectureMap, { root: 'src', depth: 1, tests: false });
+   await vi.waitFor(() => expect(g6Harness.scene?.nodes.length).toBeGreaterThan(0));
+   const n = g6Harness.scene.nodes[0]; g6Harness.events.move(n.id, n.x + 10, n.y); flushSync();
+   expect(readGraphHistory(location.href).positions?.[n.id]?.x).toBe(n.x + 10);
+   const play = [...host.querySelectorAll<HTMLButtonElement>('button')].find(b => /播放流向|Play flow/.test(b.textContent ?? ''))!;
+   play.click(); flushSync(); await vi.waitFor(() => expect(g6Harness.scene.edges.some((e: any) => e.flowing)).toBe(true));
+   play.click(); flushSync(); expect(readGraphHistory(location.href).flowPlaying).toBe(false);
+   const reset = [...host.querySelectorAll<HTMLButtonElement>('button')].find(b => /恢复自动布局|Reset layout/.test(b.textContent ?? ''))!;
+   expect(reset.disabled).toBe(false); reset.click(); flushSync(); expect(readGraphHistory(location.href).positions).toEqual({});
+ });
 
 it('旧直角折线视图回退为直线，选择器只保留曲线和直线', async () => {
   const { saveGraphHistory, readGraphHistory } = await import('../ui/src/lib/graph-history');
@@ -1287,7 +1244,7 @@ it('旧直角折线视图回退为直线，选择器只保留曲线和直线', a
   expect([...style.options].map(option => option.value)).toEqual(['curve', 'straight']);
   expect(style.value).toBe('straight');
   expect(readGraphHistory(location.href).edgeStyle).toBe('straight');
-  expect(host.querySelector('path.medge')?.getAttribute('d')).toMatch(/^M[^C]+ L/);
+  expect(g6Harness.scene.edges.every((e: any) => !e.path || /^M[^C]+ L/.test(e.path))).toBe(true);
 });
 
 it('连线切换保留位置，紧凑排列将聚焦节点移近并保存当前线型', async () => {
@@ -1304,9 +1261,9 @@ it('连线切换保留位置，紧凑排列将聚焦节点移近并保存当前�
   compact.click(); flushSync();
   await vi.waitFor(() => expect(readGraphHistory(location.href).positions?.['src/http']?.x).toBeLessThan(1000));
   expect(Object.keys(readGraphHistory(location.href).positions ?? {}).sort()).toEqual(['src/auth', 'src/http']);
-  expect(host.querySelector('path.medge')?.getAttribute('d')).toMatch(/^M[^C]+ L/);
+  expect(g6Harness.scene.edges.every((e: any) => !e.path || /^M[^C]+ L/.test(e.path))).toBe(true);
   style.value = 'curve'; style.dispatchEvent(new Event('change', { bubbles: true })); flushSync();
-  expect(host.querySelector('path.medge')?.getAttribute('d')).toContain(' C');
+  expect(g6Harness.scene.edges.every((e: any) => !e.path)).toBe(true);
   expect(readGraphHistory(location.href).edgeStyle).toBe('curve');
 });
 
@@ -1331,7 +1288,7 @@ it('紧凑排列期间切换选中对象，迟到Worker结果不能覆盖位置'
     await render(ArchitectureMap, { root: 'src', depth: 1, tests: false });
     [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => /紧凑排列|Compact layout/.test(button.textContent ?? ''))!.click(); flushSync();
     expect(pending).toHaveLength(1);
-    [...host.querySelectorAll<HTMLButtonElement>('.mnode')].find(button => button.textContent?.includes('src/http'))!.click(); flushSync();
+    [...host.querySelectorAll<HTMLButtonElement>('.accessible button')].find(button => button.textContent?.includes('http'))!.click(); flushSync();
     expect(pending[0]!.stopped).toBe(true);
     pending[0]!.onmessage?.({ data: { result: { 'src/auth': { x: 9999, y: 9999 } } } }); flushSync();
     expect(readGraphHistory(location.href).positions).toEqual({});

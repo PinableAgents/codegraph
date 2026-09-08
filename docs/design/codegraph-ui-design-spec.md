@@ -191,8 +191,7 @@ Links between cards: **86px** wide; a 1.5px `--route-main` line with a filled ar
 at reduced opacity, and a terminal link uses `--route-muted` (polygon `76,3 84,7 76,11` in a 86×14 box);
 label 11px mono `--ink-3` centred (`calls`, `line 2029`; `via callback · registered at file:line`); uncertain dasharray `2 3`;
 heuristic dasharray `5 3`. End cap: **240px**, dashed `--rule-soft` border, 12px text — "Where the graph stops" + the boundary
-(form, key, line) + uncertain continuations. In the real build the strip is a Svelte Flow canvas laid out left→right with the
-same card/link visuals.
+(form, key, line) + uncertain continuations. In the real build the strip uses G6 Canvas with Svelte HTML code cards. Semantic positions and terminal boundaries are preserved.
 
 **End cap, as built (phase 2, CG-51).** Shown only when a flow does not reach everything the question named —
 a connected answer has no boundary to announce. 240px, 1px dashed `--rule-soft`, padding 12px, 12px/1.45 `--ink-2`,
@@ -207,24 +206,26 @@ hangs off opens at the dispatch line and tints it `--accent-soft`. One cap per s
 The verdict comes from `src/graph/dynamic-boundary-report.ts` — the detector `codegraph_explore` announces boundaries
 with — so the strip and the MCP answer cannot disagree.
 
-### 3.6 Map (`#/map`)
-Grid: canvas `minmax(600px,1fr)` | side panel **320px** (`--rule-soft` left border, 14px 16px padding).
-Nodes: rect `width = max(110, label.length × 7.3 + 28)`, **height 40**, `--paper` fill, 1px `--rule-soft` stroke,
-`--route-branch` left status rail and station ring (`--route-main` double outline when hovered/selected; `--route-muted` when dimmed;
-test modules dashed `4 3` in `--ink-3`), label 13px mono at (10,17), count
-"N symbols · M files" 11px `--ink-3` at (10,32). Layers: vertical gap **74px**, horizontal gap **34px**, padding 44px; entry points at the
-top ("entry points" label), foundations at the bottom ("foundations — depend on nothing below"); faint layer lines `--rule-faint`.
-Layout: aggregate edges by module; break 2-cycles keeping the heavier direction; longest-path layering (a module sits one layer
-above everything it depends on); barycenter ordering, 3 sweeps; single-node layers centred; ports spread along each box
-(`x = left + width × (i+1)/(n+1)` over the node's sorted out/in edges) so bundles fan. Edges: cubic `M x0,y0 C x0,my x1,my x1,y1`
-(`my` = midpoint), `stroke-width = min(6, 1 + log2(count) × 0.7)`, `--route-branch` at opacity 0.48
-(`--route-main` 0.95 when hot, dimmed 0.06); a 12px transparent
-hit path per edge; edges with count < 4 (< 6 when tests included) hidden until a touching module is selected; cycle back-edges only when
-selected, `--route-return` opacity 0.82, dasharray `4 3`. Tooltip: `--paper-2`, 1px `--route-main` border, 8px 10px, 12px: "src/a → src/b", "N edges",
-by kind, top 4 symbol pairs. Side panel: title, 2-sentence explanation, hidden-edge note, "Include tests, scripts, kernel & site" checkbox,
-"Mutual dependencies" fold, selected module's dependencies/dependents with counts and its files. Fit: SVG width 100%,
-`viewBox` to content, `height: max(100%, 0.9 × content)` so labels never scale below ~0.9. In the real build this is a Svelte Flow
-canvas (custom node + custom edge components; hidden handles as ports; pan/zoom/fitView) with the same geometry.
+### 3.6 Map and shared graph analysis (G6, 2026-09-08)
+Map, Screens, Flow and Steps share `GraphCanvas` and the internal `GraphScene` / `GraphController` boundary.
+Map uses left-to-right AntV Dagre in a cancellable Worker. Directed strongly connected components are condensed before layout;
+cycles have a stable internal arrangement. Directory groups reserve separate space. Map defaults to directory Combos; cycle Combos
+are an alternative grouping mode. There are no editing handles or heavy grid lines.
+
+Native nodes have rounded outlines and readable module labels. Edges stay between 1 and 2px, with 2.5px highlights.
+Map merges mutual dependencies into one display edge with two arrows and separate directional counts. Every display edge keeps
+its original IDs; BFS and cycle analysis always use the loaded, filtered directed relationships. A visually upward edge is never
+classified as a cycle. File-level cycles remain a separate server-provided detail.
+
+The toolbar provides find, 100%, fit, focus selection, minimap, restore layout, one-hop direction/focus, group folding, cycle location
+and a deterministic shortest directed path. A path query unfolds hidden members; no result means no path in the current scope.
+Selection and hover only update styles, without moving nodes or recomputing routes. Map can explicitly compact incoming/current/outgoing
+nodes left-to-right and keep mutual neighbours in a separate block. Normal selection preserves positions.
+
+Small Map/Screens scenes use G6 shortest-path obstacle avoidance. More than 100 routed edges use one shared occupancy grid in the
+Worker, passing computed control points to G6; this avoids rebuilding every node's obstacle map 2,000 times on the main thread.
+The generic orth router is not treated as obstacle avoidance. Flow/Steps submit their existing semantic positions and specialized paths.
+The complete implementation and verification notes are in [G6 graph workbench](g6-graph-workbench.md).
 
 ### 3.7 Search palette
 Results panel under the input: 1px `--ink` border, max-height 420px; group headers 12px `--ink-3` (`Flow`, `Symbols & files`);
@@ -757,9 +758,7 @@ screen. Tests: `ui-steps-program.test.ts` (the fold, over hand-made records), `u
 its rows), and one `in order` reading per framework in `ui-steps-api-servers.test.ts`.
 
 ## 4. Libraries and versions
-- Svelte 5 (≥ 5.25) + Vite (workspace `ui/`), Svelte Flow `@xyflow/svelte` ^1.6 for the Map and Flow canvases only (custom nodes/edges,
-  hidden handles for port spreading, local selection state — the pattern in docker-app's `StackGraph.svelte`); `@dagrejs/dagre` only as a
-  fallback if crossing quality demands it (never ELK). Symbol view = DOM + one SVG overlay (`ResizeObserver` re-layout).
+- Svelte 5 (≥ 5.25) + Vite; exact `@antv/g6` 5.1.1 and `@antv/layout` 2.0.0 for all four graph canvases. Symbol view remains DOM + one SVG overlay (`ResizeObserver` re-layout).
 - Syntax classification comes off **the engine's own tree-sitter parse** — no highlighter dependency, no second grammar set.
   - *As built (CG-43, replaced in CG-57).* The first cut ran Shiki with 56 pruned TextMate grammars in `dist/textmate/`. That is
     gone: `@shikijs/*` is off the dependency list, `scripts/prune-grammars.mjs` and `npm run build:textmate` are deleted, and
@@ -802,8 +801,7 @@ the same question about the same graph.
 - **Navigation is a driver, not a callback** (`ui/src/lib/navigation.ts`): the components build hrefs, because middle-click and
   "copy link address" are how people read code. The default is the viewer's hash space; a host installs its own URL space. The
   app's half — the hash parser and the live route — attaches window listeners at module scope and is **pruned out of the package**.
-- **Theming is colour and type only.** `theme.css` carries the §2.1 tokens and maps Svelte Flow's `--xy-*` variables onto them, so a
-  host never sees library defaults in the pane, controls or minimap. Geometry (34px rail rows, the 300/320px rails, the 20px code
+- **Theming is colour and type only.** `theme.css` carries the §2.1 tokens; the G6 boundary reads them for native shapes and observes theme changes. Svelte HTML cards inherit the same tokens. Geometry (34px rail rows, the 300/320px rails, the 20px code
   line) is not themable: the Symbol view measures those against each other to put a callee row beside the line that calls it.
 - Versioned with the engine (`scripts/sync-ui-version.mjs`), because the payload shapes are versioned with the binary that serves
   them. **Prepared, not published**: `"private": true` is the guard and `scripts/pack-npm.sh` only packs it under

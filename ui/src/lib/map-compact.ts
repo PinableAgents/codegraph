@@ -14,23 +14,21 @@ export function compactMapPositions({ nodes, edges, selected }: CompactMapInput)
   const before = others.filter(node => incoming.has(node.id) && !outgoing.has(node.id));
   const mutual = others.filter(node => incoming.has(node.id) && outgoing.has(node.id));
   const after = others.filter(node => !incoming.has(node.id));
-  // 双向关系仍以箭头解释；把选中节点放在这组中间，不暗示环内执行顺序。
-  const middle = [...mutual]; middle.splice(Math.floor(middle.length / 2), 0, anchor);
-  const groups = [before, middle, after].filter(group => group.length);
   const cellWidth = Math.max(...nodes.map(node => node.width)) + 64;
   const cellHeight = Math.max(...nodes.map(node => node.height)) + 64;
-  const maxColumns = Math.max(...groups.map(group => Math.ceil(Math.sqrt(group.length))));
-  const width = maxColumns * cellWidth;
   const positions: Record<string, { x: number; y: number }> = Object.create(null);
-  let y = 60;
-  for (const group of groups) {
-    const columns = Math.ceil(Math.sqrt(group.length));
+  const rows = Math.max(1, Math.ceil(Math.sqrt(Math.max(before.length,after.length))));
+  const beforeColumns = Math.max(1,Math.ceil(before.length/rows));
+  const anchorX=40+beforeColumns*cellWidth;
+  positions[anchor.id]={x:anchorX,y:60+(rows-1)*cellHeight/2};
+  for (const [group,startX] of [[before,40],[after,anchorX+cellWidth]] as const) {
     for (let i = 0; i < group.length; i++) {
-      const node = group[i]!; const row = Math.floor(i / columns);
-      const rowCount = Math.min(columns, group.length - row * columns);
-      positions[node.id] = { x: 40 + (width - rowCount * cellWidth) / 2 + i % columns * cellWidth + (cellWidth - node.width) / 2, y: y + row * cellHeight };
+      const node=group[i]!;
+      positions[node.id]={x:startX+Math.floor(i/rows)*cellWidth,y:60+i%rows*cellHeight};
     }
-    y += Math.ceil(group.length / columns) * cellHeight + 48;
   }
+  // Mutual neighbours occupy a separate block below the current module.
+  const columns=Math.max(1,Math.ceil(Math.sqrt(mutual.length)));
+  mutual.forEach((node,i)=>positions[node.id]={x:anchorX+(i%columns)*cellWidth,y:60+rows*cellHeight+48+Math.floor(i/columns)*cellHeight});
   return positions;
 }

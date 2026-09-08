@@ -26,22 +26,19 @@
   import { graphText } from '../lib/graph-copy';
   import DetailPanel from '../components/graph/DetailPanel.svelte';
   import { untrack } from 'svelte';
-  import CanvasTools from '../components/graph/CanvasTools.svelte';
   import { graphBudget } from '../lib/graph-budget';
   import { requestLayout } from '../lib/graph-layout';
-  import { SvelteFlow, Controls, type Node, type Edge, type Viewport } from '@xyflow/svelte';
-  import '@xyflow/svelte/dist/style.css';
-  import ScreenNode from '../components/screens/ScreenNode.svelte';
-  import ScreenEdge from '../components/screens/ScreenEdge.svelte';
+  import GraphCanvas from '../components/graph/GraphCanvas.svelte';
+  import { graphScene } from '../lib/graph-adapters';
+  import type { Node, Edge } from '../lib/graph-scene';
   import KindGlyph from '../components/KindGlyph.svelte';
   import { fetchScreens, type WireScreensPayload, type WireScreenLink } from '../lib/api';
   import { live } from '../lib/live.svelte';
   import { symbolHref, fileHref, navigate, stepsHref, mapHref } from '../lib/navigation';
-  import { isEdgeVisible, type MapEdgeLayout } from '../lib/map-model';
+  import type { MapEdgeLayout } from '../lib/map-model';
   import { commonTokens, conditionTokens, restTokens, scenarios, whenWords, type WordToken } from '../lib/conditions';
   import {
     hoverPill,
-    nearestEdge,
     neighbourhood,
     pairId,
     placeLabels,
@@ -49,6 +46,7 @@
     type ScreensModel,
   } from '../lib/screens-model';
 
+  let visibleCounts = $state<{nodes:number;edges:number}|null>(null);
   let payload = $state<WireScreensPayload | null>(null);
   let retry = $state(0);
   let error = $state<string | null>(null);
@@ -58,10 +56,8 @@
   /** The panel row under the pointer: its edge on the canvas, and the one transition it names. */
   let panelHot = $state<{ edge: string; link: WireScreenLink } | null>(null);
   let stage = $state<HTMLDivElement | null>(null);
-  /** Svelte Flow's pan and zoom, for turning a pointer position into a point on the canvas. */
-  let viewport = $state<Viewport | undefined>(undefined);
+  /** G6's pan and zoom, for turning a pointer position into a point on the canvas. */
   /** How close, in screen pixels, the pointer must be to a line to mean it. */
-  const HOVER_REACH = 10;
 
   // The key stays open until the reader closes it; the choice survives a
   // reload but is per browser — a preference, not a fact about the project.
@@ -69,9 +65,9 @@
   let legendOpen = $state(readLegendOpen());
   function readLegendOpen(): boolean {
     try {
-      return localStorage.getItem(LEGEND_KEY) !== 'closed';
+      return localStorage.getItem(LEGEND_KEY) === 'open';
     } catch {
-      return true;
+      return false;
     }
   }
   $effect(() => {
@@ -82,9 +78,6 @@
     }
   });
 
-  const FIT = { fitViewOptions: { padding: 0.1, maxZoom: 1, minZoom: 0.4 } };
-  const nodeTypes = { screen: ScreenNode };
-  const edgeTypes = { screen: ScreenEdge };
 
   $effect(() => {
     void retry;
@@ -172,7 +165,7 @@
     if (model === null) return [];
     const focus = focusId;
     return model.layout.edges
-      .filter((edge) => isEdgeVisible(edge, selected))
+
       .map((edge) => {
         const touches = selected !== null && (edge.source === selected || edge.target === selected);
         const isFocus = focus === edge.id;
@@ -211,10 +204,6 @@
   );
   const hoveredInfo = $derived(hovered === null || model === null ? null : (model.edges.get(hovered.edge.id) ?? null));
 
-  const edgeById = $derived(
-    model === null ? new Map<string, MapEdgeLayout>() : new Map(model.layout.edges.map((e) => [e.id, e]))
-  );
-  const visibleIds = $derived(new Set(edges.map((e) => e.id)));
 
   function onEdgeHover(edge: MapEdgeLayout | null, event: MouseEvent | null): void {
     if (edge === null || event === null || stage === null) {
@@ -233,40 +222,10 @@
    * The pointer on the canvas means the line nearest it. A pill speaks for
    * its own line; over a box, the key or the tooltip there is no line.
    */
-  function onStageMove(event: MouseEvent): void {
-    if (model === null || stage === null) return;
-    const target = event.target as Element | null;
-    if (target?.closest('.spill')) return;
-    if (target?.closest('.snode, .legend, .tip, .svelte-flow__controls')) {
-      hovered = null;
-      return;
-    }
-    const view = viewport ?? readViewport();
-    if (!view) return;
-    const box = stage.getBoundingClientRect();
-    const point = {
-      x: (event.clientX - box.left - view.x) / view.zoom,
-      y: (event.clientY - box.top - view.y) / view.zoom,
-    };
-    const hit = nearestEdge(model, point, visibleIds, HOVER_REACH / view.zoom);
-    const edge = hit === null ? undefined : edgeById.get(hit.id);
-    if (!edge) {
-      hovered = null;
-      return;
-    }
-    hovered = {
-      edge,
-      x: Math.min(event.clientX - box.left + 14, box.width - 360),
-      y: event.clientY - box.top + 14,
-    };
-  }
 
-  /** The transform Svelte Flow applied, for the moment before the binding has a value. */
-  function readViewport(): Viewport | null {
-    const el = stage?.querySelector<HTMLElement>('.svelte-flow__viewport');
-    const m = el?.style.transform.match(/translate\(([-\d.]+)px,\s*([-\d.]+)px\)\s*scale\(([-\d.]+)\)/);
-    return m ? { x: Number(m[1]), y: Number(m[2]), zoom: Number(m[3]) } : null;
-  }
+
+  /** The transform G6 applied, for the moment before the binding has a value. */
+
 
   /** The row under the pointer: light its line, and say the whole condition on it. */
   function onRowHover(link: WireScreenLink | null): void {
@@ -307,10 +266,12 @@
 
   $effect(() => {
     if (!payload) return;
-    return graphStatus.set({ nodes: nodes.length, edges: edges.length, scope: scope || graphText('所有页面', 'All screens'), filter: scope ? graphText('一跳范围', 'One-hop scope') : undefined, excluded: payload.dropped ? `${payload.dropped} ${graphText('未归属导航', 'unattributed transitions')}` : undefined,
+    return graphStatus.set({ nodes: visibleCounts?.nodes ?? nodes.length, edges: visibleCounts?.edges ?? edges.length, scope: scope || graphText('所有页面', 'All screens'), filter: scope ? graphText('一跳范围', 'One-hop scope') : undefined, excluded: payload.dropped ? `${payload.dropped} ${graphText('未归属导航', 'unattributed transitions')}` : undefined,
       budget: budget?.exceeded ? graphText('超过画布预算，请缩小范围', 'Canvas budget exceeded; narrow scope') : '400 / 2000',
     });
   });
+  const canvasScene = $derived(graphScene('screens', nodes, edges, {}, scopedPayload?.links.map(link=>({id:link.id,source:link.from,target:link.to})),
+    model ? [...new Set([...model.nodes.values()].flatMap(n => n.screen?.file ? [n.screen.file] : []))].map(file => ({ id: 'page:' + file, label: file, members: [...model.nodes.values()].filter(n => n.screen?.file === file).map(n => n.id) })).filter(g => g.members.length > 1) : []));
 </script>
 
 {#snippet words(tokens: WordToken[])}
@@ -326,7 +287,7 @@
   <button disabled={!selected} onclick={() => selected && navigate(stepsHref({ anchor: selected }))}>{graphText('查看此处步骤', 'Read steps from here')}</button>
 </div>
 <div class="screens">
-  <div class="stage" bind:this={stage} role="presentation" onmousemove={onStageMove} onmouseleave={() => (hovered = null)}>
+  <div class="stage" bind:this={stage} role="presentation" onmouseleave={() => (hovered = null)}>
     {#if error && model}<div class="retry-banner" role="alert">{error} <button onclick={() => retry++}>{graphText('重试', 'Retry')}</button></div>{/if}
     {#if budget?.exceeded}
       <div class="budget-scope"><BudgetNotice nodes={budget.nodes} edges={budget.edges} />
@@ -350,32 +311,8 @@
         </p>
       </div>
     {:else if model !== null}
-      <SvelteFlow
-        onlyRenderVisibleElements
-        {nodes}
-        {edges}
-        {nodeTypes}
-        {edgeTypes}
-        fitView={!restored.viewport}
-        initialViewport={restored.viewport}
-        {...FIT}
-        bind:viewport
-        minZoom={0.2}
-        maxZoom={3}
-        nodesDraggable={false}
-        nodesConnectable={false}
-        elementsSelectable={false}
-        panOnDrag
-        proOptions={{ hideAttribution: true }}
-        onpaneclick={() => {
-          selected = null;
-          hovered = null;
-          panelHot = null;
-        }}
-      >
-        <CanvasTools items={[...model.nodes.values()].map(n => ({ id: n.id, label: n.label }))} {selected} onSelect={(id) => selected = id} />
-        <Controls position="bottom-right" showLock={false} />
-      </SvelteFlow>
+      <GraphCanvas scene={canvasScene} onVisibleChange={counts=>visibleCounts=counts} {selected}
+        onSelect={id => { selected = id; hovered = null; panelHot = null; }} />
 
       <!-- The key, on the picture it explains. Each row draws the actual
            stroke or box, not a word for it — a reader matches shapes, not
@@ -395,8 +332,8 @@
               <span>Destination inferred from a helper's return value</span>
             </div>
             <div class="lrow">
-              <svg width="44" height="12" aria-hidden="true"><path d="M2 6 H42" class="k-line k-back" /></svg>
-              <span>Goes back up the picture (returning) — leaves the top of its box, arrives at the bottom of the other</span>
+              <svg width="44" height="12" aria-hidden="true"><path d="M2 6 H42" class="k-line" /></svg>
+              <span>{graphText('箭头表示真实跳转方向；在分析菜单中定位循环', 'Arrows show the real transition direction; cycles are identified in Analyze')}</span>
             </div>
             <div class="lrow">
               <span class="k-label mono">→ …x</span>
@@ -537,17 +474,10 @@
             · <b>{payload.origins.length}</b> triggered outside a screen{/if}.
         </p>
         <p class="dim">
-          <span class="mark">●</span> The entry screen is at the top; each row down is one more
-          transition away from it. Click a screen and each of its transitions is labelled at the far
-          end of its line — beside the screen it leads to or comes from — with the last condition
-          checked before it happens; hover the line, or its row here, for the whole chain and the
-          calls it travels through.
+          <span class="mark">●</span> {graphText('入口页面在上方，逐层展示页面跳转。选中页面查看相邻关系，悬停连线或详情行查看条件及调用来源。', 'Entry screens are at the top, with transitions on successive layers. Select a screen for adjacent relationships; hover an edge or detail row for conditions and call origins.')}
         </p>
         <p class="dim">
-          Solid: the destination is written at the call. Dashed grey: it comes back from a
-          helper's return value (inferred). Dashed accent: a transition back up the picture
-          (returning), drawn around the boxes rather than through them. Dashed box: a trigger that
-          is not a screen — shared chrome, or code no screen's render chain reaches.
+          {graphText('实线表示直接跳转，虚线表示经返回值等方式推导的关系。箭头保留跳转方向，循环由真实有向关系计算。虚线节点表示共享入口、未到达页面或页面边界。', 'Solid edges represent direct transitions; dashed edges represent synthesized relationships. Arrows retain navigation direction; cycles are computed from real directed relationships. Dashed nodes indicate shared origins, unreached screens or boundaries.')}
         </p>
         {#if model.unreached > 0}
           <p class="dim">
@@ -595,33 +525,6 @@
       linear-gradient(var(--route-grid) 1px, transparent 1px),
       linear-gradient(90deg, var(--route-grid) 1px, transparent 1px);
     background-size: 24px 24px;
-  }
-  .stage :global(.svelte-flow) {
-    background-color: transparent;
-  }
-  .stage :global(.svelte-flow__handle) {
-    opacity: 0;
-    width: 1px;
-    height: 1px;
-    min-width: 0;
-    min-height: 0;
-    border: 0;
-    pointer-events: none;
-  }
-  /* The label layer covers the canvas; only the pills in it take the pointer,
-     never the empty paper between them — the lines underneath do. */
-  .stage :global(.svelte-flow__edge-labels) {
-    pointer-events: none;
-  }
-  .stage :global(.svelte-flow__controls-button) {
-    background: var(--paper-2);
-    border: 0;
-    border-bottom: 1px solid var(--rule-soft);
-    border-radius: 0;
-    color: var(--route-branch);
-  }
-  .stage :global(.svelte-flow__controls-button svg) {
-    fill: var(--route-branch);
   }
   .state {
     padding: 48px 40px;
@@ -676,11 +579,6 @@
   }
   .k-line.k-synth {
     stroke-dasharray: 5 3;
-  }
-  .k-line.k-back {
-    stroke: var(--route-return);
-    stroke-opacity: 0.8;
-    stroke-dasharray: 4 3;
   }
   .k-label {
     font-size: 10.5px;

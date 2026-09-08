@@ -22,17 +22,12 @@
   import { graphText } from '../lib/graph-copy';
   import DetailPanel from '../components/graph/DetailPanel.svelte';
   import { untrack } from 'svelte';
-  import CanvasTools from '../components/graph/CanvasTools.svelte';
   import { programBudget } from '../lib/graph-budget';
   import { requestLayout } from '../lib/graph-layout';
-  import { SvelteFlow, Controls, type Node, type Edge, type Viewport } from '@xyflow/svelte';
-  import '@xyflow/svelte/dist/style.css';
-  import StepNode from '../components/steps/StepNode.svelte';
-  import ForkPoint from '../components/steps/ForkPoint.svelte';
-  import DecisionCaption from '../components/steps/DecisionCaption.svelte';
-  import RegionCaption from '../components/steps/RegionCaption.svelte';
+  import GraphCanvas from '../components/graph/GraphCanvas.svelte';
+  import { graphScene } from '../lib/graph-adapters';
+  import type { Node, Edge } from '../lib/graph-scene';
   import StepsKey from '../components/steps/StepsKey.svelte';
-  import ScreenEdge from '../components/screens/ScreenEdge.svelte';
   import KindGlyph from '../components/KindGlyph.svelte';
   import {
     canDrawSteps,
@@ -48,13 +43,12 @@
   import { live } from '../lib/live.svelte';
   import { fileHref, flowHref, navigate, stepsHref, symbolHref } from '../lib/navigation';
   import type { MapEdgeLayout } from '../lib/map-model';
-  import { hoverPill, nearestEdge, placeLabels } from '../lib/screens-model';
+  import { hoverPill, placeLabels } from '../lib/screens-model';
   import { commonTokens, conditionTokens, restTokens, scenarios, whenWords, type WordToken } from '../lib/conditions';
   import {
     kindWord,
     kindWords,
     selectionReach,
-    stepEdgeVisible,
     stepNeighbourhood,
     stepPairId,
     stepViaText,
@@ -78,6 +72,7 @@
   }
   let { anchor, symbol, depth, through, reading }: Props = $props();
 
+  let visibleCounts = $state<{nodes:number;edges:number}|null>(null);
   let payload = $state<WireStepsPayload | null>(null);
   let anchorChoice = $state('');
   let retry = $state(0);
@@ -88,8 +83,6 @@
   /** The panel row under the pointer: its edge on the canvas, and the one link it names. */
   let panelHot = $state<{ edge: string; link: WireStepLink } | null>(null);
   let stage = $state<HTMLDivElement | null>(null);
-  let viewport = $state<Viewport | undefined>(undefined);
-  const HOVER_REACH = 10;
 
   /** The chooser's lists, when the view opens without an anchor: the screens of an app, else the endpoints of an API. */
   let screens = $state<WireScreen[] | null>(null);
@@ -120,9 +113,9 @@
   let legendOpen = $state(readLegendOpen());
   function readLegendOpen(): boolean {
     try {
-      return localStorage.getItem(LEGEND_KEY) !== 'closed';
+      return localStorage.getItem(LEGEND_KEY) === 'open';
     } catch {
-      return true;
+      return false;
     }
   }
   $effect(() => {
@@ -133,7 +126,6 @@
     }
   });
 
-  const nodeTypes = { step: StepNode, region: RegionCaption, fork: ForkPoint, decision: DecisionCaption };
 
   /** Start the picture at a step — the panel's *Start here →*. False for a step with no symbol, or the anchor. */
   function startHere(id: string): boolean {
@@ -142,7 +134,6 @@
     navigate(stepsHref({ anchor: step.node.id }));
     return true;
   }
-  const edgeTypes = { screen: ScreenEdge };
   const DEPTHS = [4, 6, 8, 10, 12];
 
   const asked = $derived(anchor !== null || symbol !== null);
@@ -241,11 +232,7 @@
    * to `string` it silently fails to typecheck against the very option it is
    * written for.
    */
-  const fitOptions = $derived(
-    model !== null && model.layout.nodes.length <= 24 && legendOpen
-      ? { padding: { left: '440px', top: '32px', right: '32px', bottom: '32px' } as const, maxZoom: 1, minZoom: 0.4 }
-      : { padding: 0.1, maxZoom: 1, minZoom: model !== null && model.regions !== null ? 0.2 : 0.4 }
-  );
+
 
   /** The selection with the decision points it touches — what the edge filter and the dimming reason over. */
   const reach = $derived(model === null || selected === null ? null : selectionReach(model, selected));
@@ -290,7 +277,7 @@
       draggable: false,
       selectable: false,
       connectable: false,
-      data: { label: zone.label, width: zone.width },
+      data: { label: zone.label, width: zone.width,relatedIds:model.layout.nodes.filter(n=>n.x>=zone.x&&n.x<zone.x+zone.width&&n.y>=zone.y&&n.y<zone.y+zone.height).map(n=>n.id) },
     }));
     // A decision made inside a box, said once under it; each line out of that
     // box says only which way it is.
@@ -303,7 +290,7 @@
         draggable: false,
         selectable: false,
         connectable: false,
-        data: { label: d.label, width: d.width, dimmed: neighbours !== null && !neighbours.has(owner) },
+        data: { label: d.label, width: d.width, owner,dimmed: neighbours !== null && !neighbours.has(owner) },
       });
     }
     return captions.concat(model.layout.nodes.map((node) => {
@@ -348,7 +335,7 @@
     if (model === null) return [];
     const focus = focusId;
     return model.layout.edges
-      .filter((edge) => stepEdgeVisible(model, edge, selected, reach ?? undefined))
+
       .map((edge) => {
         const touches =
           reach !== null && (reach.has(edge.source) || reach.has(edge.target));
@@ -383,10 +370,6 @@
   const selectedInfo = $derived(selected === null || model === null ? null : (model.nodes.get(selected) ?? null));
   const lists = $derived(selected === null || payload === null ? null : stepNeighbourhood(payload, selected));
   const hoveredInfo = $derived(hovered === null || model === null ? null : (model.edges.get(hovered.edge.id) ?? null));
-  const edgeById = $derived(
-    model === null ? new Map<string, MapEdgeLayout>() : new Map(model.layout.edges.map((e) => [e.id, e]))
-  );
-  const visibleIds = $derived(new Set(edges.map((e) => e.id)));
 
   /** The same picture with one setting changed: the anchor as the URL asked for it, the rest kept. */
   function rewrite(changes: { depth?: number; through?: boolean; view?: 'order' | 'tree' }): string {
@@ -414,39 +397,9 @@
     };
   }
 
-  function onStageMove(event: MouseEvent): void {
-    if (model === null || stage === null) return;
-    const target = event.target as Element | null;
-    if (target?.closest('.spill')) return;
-    if (target?.closest('.snode, .legend, .tip, .svelte-flow__controls')) {
-      hovered = null;
-      return;
-    }
-    const view = viewport ?? readViewport();
-    if (!view) return;
-    const box = stage.getBoundingClientRect();
-    const point = {
-      x: (event.clientX - box.left - view.x) / view.zoom,
-      y: (event.clientY - box.top - view.y) / view.zoom,
-    };
-    const hit = nearestEdge(model, point, visibleIds, HOVER_REACH / view.zoom);
-    const edge = hit === null ? undefined : edgeById.get(hit.id);
-    if (!edge) {
-      hovered = null;
-      return;
-    }
-    hovered = {
-      edge,
-      x: Math.min(event.clientX - box.left + 14, box.width - 420),
-      y: event.clientY - box.top + 14,
-    };
-  }
 
-  function readViewport(): Viewport | null {
-    const el = stage?.querySelector<HTMLElement>('.svelte-flow__viewport');
-    const m = el?.style.transform.match(/translate\(([-\d.]+)px,\s*([-\d.]+)px\)\s*scale\(([-\d.]+)\)/);
-    return m ? { x: Number(m[1]), y: Number(m[2]), zoom: Number(m[3]) } : null;
-  }
+
+
 
   function onRowHover(link: WireStepLink | null): void {
     const edge = link === null ? null : stepPairId(link);
@@ -503,10 +456,14 @@
 
   $effect(() => {
     if (!payload) return;
-    return graphStatus.set({ nodes: nodes.length, edges: edges.length, scope: payload.anchor.name, filter: `${readAs} · ${graphText('深度', 'Depth')} ${depth ?? payload.depth} · through=${through}`, excluded: payload.truncated?.hubs ? `${payload.truncated.hubs} ${graphText('高扇出边界', 'fan-out boundaries')}` : undefined,
+    return graphStatus.set({ nodes: visibleCounts?.nodes ?? nodes.length, edges: visibleCounts?.edges ?? edges.length, scope: payload.anchor.name, filter: `${readAs} · ${graphText('深度', 'Depth')} ${depth ?? payload.depth} · through=${through}`, excluded: payload.truncated?.hubs ? `${payload.truncated.hubs} ${graphText('高扇出边界', 'fan-out boundaries')}` : undefined,
       budget: budget?.exceeded ? graphText('超过画布预算，请缩小范围', 'Canvas budget exceeded; narrow scope') : '400 / 2000',
     });
   });
+  const canvasScene = $derived(graphScene('steps', nodes, edges, {},
+    payload?.links.map(link => ({ id: link.id, source: link.from, target: link.to })),
+    (model?.regions ?? []).map(zone => ({ id: 'zone:' + zone.id, label: zone.label,
+      members: nodes.filter(n => n.position.x >= zone.x && n.position.x < zone.x + zone.width && n.position.y >= zone.y && n.position.y < zone.y + zone.height).map(n => n.id) }))));
 </script>
 
 {#snippet words(tokens: WordToken[])}
@@ -525,7 +482,7 @@
   <button disabled={!selected} onclick={() => selected && startHere(selected)}>{graphText('以选中节点为起点', 'Start from selection')}</button>
 </div>
 <div class="steps">
-  <div class="stage" bind:this={stage} role="presentation" onmousemove={onStageMove} onmouseleave={() => (hovered = null)}>
+  <div class="stage" bind:this={stage} role="presentation" onmouseleave={() => (hovered = null)}>
     {#if error && model}<div class="retry-banner" role="alert">{error} <button onclick={() => retry++}>{graphText('重试', 'Retry')}</button></div>{/if}
     {#if !supported}
       <div class="state">
@@ -591,32 +548,8 @@
         <p><a class="pick" href={rewrite({ view: 'tree' })}>What it sets in motion →</a></p>
       </div>
     {:else if model !== null && payload !== null}
-      <SvelteFlow
-        onlyRenderVisibleElements
-        {nodes}
-        {edges}
-        {nodeTypes}
-        {edgeTypes}
-        fitView={!restored.viewport}
-        initialViewport={restored.viewport}
-        fitViewOptions={fitOptions}
-        bind:viewport
-        minZoom={0.2}
-        maxZoom={3}
-        nodesDraggable={false}
-        nodesConnectable={false}
-        elementsSelectable={false}
-        panOnDrag
-        proOptions={{ hideAttribution: true }}
-        onpaneclick={() => {
-          selected = null;
-          hovered = null;
-          panelHot = null;
-        }}
-      >
-        <CanvasTools items={[...model.nodes.values()].map(n => ({ id: n.id, label: n.step.label }))} {selected} onSelect={(id) => selected = id} />
-        <Controls position="bottom-right" showLock={false} />
-      </SvelteFlow>
+      <GraphCanvas scene={canvasScene} onVisibleChange={counts=>visibleCounts=counts} {selected}
+        onSelect={id => { selected = id; hovered = null; panelHot = null; }} />
 
 
       {#if hovered !== null && hoveredInfo !== null}
@@ -892,31 +825,6 @@
       linear-gradient(var(--route-grid) 1px, transparent 1px),
       linear-gradient(90deg, var(--route-grid) 1px, transparent 1px);
     background-size: 24px 24px;
-  }
-  .stage :global(.svelte-flow) {
-    background-color: transparent;
-  }
-  .stage :global(.svelte-flow__handle) {
-    opacity: 0;
-    width: 1px;
-    height: 1px;
-    min-width: 0;
-    min-height: 0;
-    border: 0;
-    pointer-events: none;
-  }
-  .stage :global(.svelte-flow__edge-labels) {
-    pointer-events: none;
-  }
-  .stage :global(.svelte-flow__controls-button) {
-    background: var(--paper-2);
-    border: 0;
-    border-bottom: 1px solid var(--rule-soft);
-    border-radius: 0;
-    color: var(--route-branch);
-  }
-  .stage :global(.svelte-flow__controls-button svg) {
-    fill: var(--route-branch);
   }
   .state {
     padding: 48px 40px;

@@ -1,4 +1,3 @@
-import type { Position, NodeHandle } from '@xyflow/svelte';
 import { isEdgeVisible, portPoint, type MapEdgeLayout, type MapLayout } from './map-model';
 
 /** 只在布局变化时建立，选择与悬停复用同一份图索引。 */
@@ -41,12 +40,12 @@ export function cachedPresentation<T, V>(build: (source: T, flags: string) => V)
 }
 
 /** 固定尺寸模块的已知几何；坐标匹配 1px Handle 的居中位移。 */
-export function mapNodeMeasurements(node: { width: number; height: number }): { measured: { width: number; height: number }; handles: NodeHandle[] } {
+export function mapNodeMeasurements(node: { width: number; height: number }) {
   return {
     measured: { width: node.width, height: node.height },
     handles: [
-      { id: 'in', type: 'target', position: 'top' as Position.Top, x: node.width / 2 - .5, y: -.5, width: 1, height: 1 },
-      { id: 'out', type: 'source', position: 'bottom' as Position.Bottom, x: node.width / 2 - .5, y: node.height - .5, width: 1, height: 1 },
+      { id: 'in', type: 'target', position: 'top', x: node.width / 2 - .5, y: -.5, width: 1, height: 1 },
+      { id: 'out', type: 'source', position: 'bottom', x: node.width / 2 - .5, y: node.height - .5, width: 1, height: 1 },
     ],
   };
 }

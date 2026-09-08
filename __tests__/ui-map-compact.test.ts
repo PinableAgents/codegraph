@@ -11,8 +11,9 @@ describe('聚焦图紧凑排列', () => {
   it('保留全部节点，上游在前、下游在后，不依赖旧全图坐标', () => {
     const positions = compactMapPositions(data);
     expect(Object.keys(positions).sort()).toEqual(data.nodes.map(node => node.id).sort());
-    expect(positions.incoming!.y).toBeLessThan(positions.anchor!.y);
-    expect(positions.outgoing!.y).toBeGreaterThan(positions.anchor!.y);
+    expect(positions.incoming!.x).toBeLessThan(positions.anchor!.x);
+    expect(positions.outgoing!.x).toBeGreaterThan(positions.anchor!.x);
+    expect(positions.mutual!.y).toBeGreaterThan(positions.anchor!.y);
     expect(compactMapPositions({ ...data, nodes: [...data.nodes].reverse(), edges: [...data.edges].reverse() })).toEqual(positions);
     expect(calculateLayout('map-compact', data, {})).toEqual(positions);
   });

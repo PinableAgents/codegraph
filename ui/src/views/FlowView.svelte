@@ -8,7 +8,7 @@
   one the MCP tool describes would get the two quoted against each other in a
   review, and one of them would be wrong.
 
-  Svelte Flow draws it, for pan, zoom and fit and nothing else: positions come
+  G6 draws it, for pan, zoom and fit and nothing else: positions come
   from `buildFlowLayout`, the flow picker is local state, and nothing is
   draggable. Clicking a card opens the Symbol view with the trail set to the
   path so far, so the strip hands the reader off to the view that goes deep.
@@ -20,16 +20,15 @@
   import { graphText } from '../lib/graph-copy';
   import SymbolPicker from '../components/graph/SymbolPicker.svelte';
   import { untrack } from 'svelte';
-  import CanvasTools from '../components/graph/CanvasTools.svelte';
   import { graphBudget } from '../lib/graph-budget';
   import { requestLayout } from '../lib/graph-layout';
-  import { SvelteFlow, Controls, type Node, type Edge } from '@xyflow/svelte';
-  import '@xyflow/svelte/dist/style.css';
+  import GraphCanvas from '../components/graph/GraphCanvas.svelte';
+  import { graphScene } from '../lib/graph-adapters';
+  import type { Node, Edge, GraphController } from '../lib/graph-scene';
   import FlowCard from '../components/flow/FlowCard.svelte';
-  import FlowLink from '../components/flow/FlowLink.svelte';
   import FlowEndCap from '../components/flow/FlowEndCap.svelte';
   import ExportButtons from '../components/ExportButtons.svelte';
-  import { exportFilename, flowSvg } from '../lib/export-svg';
+  import { exportFilename } from '../lib/export-svg';
   import { fetchFlow, type WireFlow, type WireFlowPayload } from '../lib/api';
   import { live } from '../lib/live.svelte';
   import { navigate, symbolHref, flowHref } from '../lib/navigation';
@@ -48,6 +47,7 @@
 
   let { from, to, symbols, trailParam }: Props = $props();
 
+  let visibleCounts = $state<{nodes:number;edges:number}|null>(null);
   let payload = $state<WireFlowPayload | null>(null);
   let retry = $state(0);
   let error = $state<string | null>(null);
@@ -71,9 +71,6 @@
    * at the first card, full size, and pans. The Controls' fit button is still
    * there for anyone who wants the shape rather than the code.
    */
-  const START_VIEWPORT = { x: 0, y: 0, zoom: 1 };
-  const nodeTypes = { flow: FlowCard, cap: FlowEndCap };
-  const edgeTypes = { flow: FlowLink };
 
   /** The hops the trail form asks for, as `<dir><id>` — the wire's own spelling. */
   const trailHops = $derived<TrailHop[]>(trailParam ? decodeTrail(trailParam) : []);
@@ -262,16 +259,7 @@
       : (activeFlow?.label ?? 'flow')
   );
 
-  function buildSvg(scale: number): string {
-    if (layout === null) throw new Error('There is no strip to export yet.');
-    const hops = activeFlow?.hops.length ?? 0;
-    return flowSvg(layout, {
-      scale,
-      activeFlowId: picked,
-      showAll,
-      caption: showAll ? exportLabel : `${exportLabel}${hops > 1 ? ` · ${hops} hops` : ''}`,
-    });
-  }
+
   const stateKey = typeof location === 'undefined' ? '' : location.href;
   const restored = untrack(() => readGraphHistory(stateKey));
   picked = restored.picked ?? null;
@@ -279,10 +267,17 @@
   $effect(() => saveGraphHistory(stateKey, { picked, showAll }));
   $effect(() => {
     if (!payload) return;
-    return graphStatus.set({ nodes: nodes.length, edges: edges.length, scope: exportLabel, filter: showAll ? graphText('所有已返回路径，最多4条', 'All returned paths, at most 4') : graphText('单条路径', 'Single path'), excluded: payload.unresolved?.length ? `${payload.unresolved.length} ${graphText('未解析符号', 'unresolved symbols')}` : undefined,
+    return graphStatus.set({ nodes: visibleCounts?.nodes ?? nodes.length, edges: visibleCounts?.edges ?? edges.length, scope: exportLabel, filter: showAll ? graphText('所有已返回路径，最多4条', 'All returned paths, at most 4') : graphText('单条路径', 'Single path'), excluded: payload.unresolved?.length ? `${payload.unresolved.length} ${graphText('未解析符号', 'unresolved symbols')}` : undefined,
       budget: budget?.exceeded ? graphText('超过画布预算，请缩小范围', 'Canvas budget exceeded; narrow scope') : '400 / 2000',
     });
   });
+  let graphController = $state.raw<GraphController | null>(null);
+  const canvasScene = $derived(graphScene('flow', nodes, edges, { flow: FlowCard, cap: FlowEndCap }, undefined,
+    shown.map(flow => ({ id: 'path:' + flow.id, label: flow.label, members: flow.hops.map(h => h.node.id).filter(id => shown.filter(f => f.hops.some(h => h.node.id === id)).length === 1) })).filter(g => g.members.length > 1)));
+  function buildSvg(scale: number): string {
+    if (!graphController) throw new Error('Graph is not ready');
+    return graphController.exportSvg(scale);
+  }
 </script>
 
 <div class="flowview">
@@ -353,25 +348,7 @@
         {/if}
       </div>
     {:else}
-      <SvelteFlow
-        onlyRenderVisibleElements
-        {nodes}
-        {edges}
-        {nodeTypes}
-        {edgeTypes}
-        initialViewport={restored.viewport ?? START_VIEWPORT}
-        fitViewOptions={{ padding: 0.1, maxZoom: 1, minZoom: 0.2 }}
-        minZoom={0.2}
-        maxZoom={1.4}
-        nodesDraggable={false}
-        nodesConnectable={false}
-        elementsSelectable={false}
-        panOnDrag
-        proOptions={{ hideAttribution: true }}
-      >
-        <CanvasTools items={layout.cards.map(n => ({ id: n.id, label: n.hop.node.name }))} />
-        <Controls position="bottom-right" showLock={false} />
-      </SvelteFlow>
+      <GraphCanvas scene={canvasScene} onVisibleChange={counts=>visibleCounts=counts} bind:controller={graphController} fitInitially={false} />
     {/if}
   </div>
 
@@ -450,36 +427,6 @@
       linear-gradient(var(--route-grid) 1px, transparent 1px),
       linear-gradient(90deg, var(--route-grid) 1px, transparent 1px);
     background-size: 24px 24px;
-  }
-
-  /* Svelte Flow paints its own surface and controls; both are re-tokenised so
-     the canvas belongs to the paper/ink system. Same treatment as the Map. */
-  .fstage :global(.svelte-flow) {
-    background-color: transparent;
-  }
-  .fstage :global(.svelte-flow__handle) {
-    width: 1px;
-    height: 1px;
-    min-width: 0;
-    min-height: 0;
-    border: 0;
-    opacity: 0;
-    pointer-events: none;
-  }
-  .fstage :global(.svelte-flow__node) {
-    cursor: default;
-  }
-  .fstage :global(.svelte-flow__controls) {
-    border: 1px solid var(--route-branch);
-    box-shadow: none;
-  }
-  .fstage :global(.svelte-flow__controls-button) {
-    background: var(--paper-2);
-    border: 0;
-    border-bottom: 1px solid var(--rule-soft);
-    border-radius: 0;
-    box-shadow: none;
-    fill: var(--route-branch);
   }
 
   .state {

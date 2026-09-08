@@ -15,6 +15,7 @@
   import DirectoryBrowser from '../graph/DirectoryBrowser.svelte';
   import { getGraphAdapter } from '../../lib/adapter';
   import { graphText } from '../../lib/graph-copy';
+  import { graphCycles } from '../../lib/graph-analysis';
   import VirtualList from '../graph/VirtualList.svelte';
   import ExportButtons from '../ExportButtons.svelte';
   import { fileHref } from '../../lib/navigation';
@@ -81,13 +82,14 @@
           .sort((a, b) => b.count - a.count || a.source.localeCompare(b.source))
   );
 
-  const thinCount = $derived(layout.edges.filter((e) => e.thin && !e.back).length);
+  const thinCount = $derived(layout.edges.filter((e) => e.thin).length);
+  const moduleCycles = $derived(graphCycles(layout.nodes.map(n=>n.id),layout.edges.filter(e=>!e.thin)));
 </script>
 
 <aside class="mapside">
   <h2>Architecture map</h2>
   <p>
-    {graphText('自动布局按依赖分层，也可拖动节点整理位置。箭头从调用或依赖方指向目标；连线粗细表示跨模块调用、导入和类型引用数量。流向动画是静态关系示意，不是运行时数据追踪。', 'The automatic layout groups dependencies; drag nodes to arrange them. Arrows point from the caller or dependent to its target. Line weight counts calls, imports and type references. Flow animation illustrates static relationships, not runtime data tracing.')}
+    {graphText('依赖从左向右分层，循环内部稳定排列。箭头从调用或依赖方指向目标，双向依赖合并为双箭头；悬停显示各方向数量。拖动节点可整理位置，播放仅示意静态关系。', 'Dependencies are layered left to right, with stable positions within cycles. Arrows point from caller or dependent to target; mutual dependencies share a double arrow. Hover for directional counts. Drag to arrange; playback illustrates static relationships.')}
   </p>
 
   <!-- The map is the thing people paste into a README, so the way out sits
@@ -104,24 +106,10 @@
     {/if}
     {#if thinCount > 0}
       <p class="dim">
-        {plural(thinCount, 'link')} carrying fewer than {layout.minWeight} references
-        {thinCount === 1 ? 'is' : 'are'} hidden until you select a module {thinCount === 1
-          ? 'it'
-          : 'they'} touch.
+        {graphText('权重筛选隐藏关系：', 'Relationships hidden by weight filter: ')}{thinCount} · &lt; {layout.minWeight}
       </p>
     {/if}
-    {#if layout.basis.kind === 'declared'}
-      <p class="dim">
-        The layering uses the {layout.basis.declaredLinks} of {layout.basis.totalLinks} links with an
-        import, a qualified name, an inheritance clause or a typed receiver behind them. Bare
-        name matches still count toward line weight, but they do not decide what sits above what.
-      </p>
-    {:else}
-      <p class="dim">
-        Too few links here carry an import or a declared type, so the layering uses raw reference
-        counts. A name shared by two unrelated modules can move a box.
-      </p>
-    {/if}
+    <p class="dim">{graphText('布局与模块级循环分析使用当前筛选范围内的真实有向关系。模块级循环与下方文件级循环独立计算；缺失置信度不作推断。', 'Layout and module cycles use real directed relationships in the filtered scope. Module cycles and file cycles below are computed independently; missing confidence is not inferred.')}</p>
     {#if payload.excluded.uncertainEdges > 0}
       <p class="dim">
         {plural(payload.excluded.uncertainEdges, 'cross-module reference')} below confidence {payload
@@ -137,8 +125,7 @@
       <summary>
         Mutual dependencies
         <span class="dim">
-          · {plural(layout.mutual.length, 'pair')} — the lighter direction, dashed when
-          selected
+          · {plural(layout.mutual.length, 'pair')} · {graphText('双箭头，保留两个方向计数', 'double arrow, both directional counts retained')}
         </span>
       </summary>
       {#each layout.mutual.slice(0, 8) as pair (pair.back.source + pair.back.target)}
@@ -153,15 +140,15 @@
     </details>
   {/if}
 
-  {#if layout.moduleCycles.length > 0}
+  {#if moduleCycles.length > 0}
     <details>
       <summary>
-        Dependency cycles
+        {graphText('模块级循环', 'Module cycles')}
         <span class="dim">
-          · {plural(layout.moduleCycles.length, 'loop')} of three or more modules
+          · {moduleCycles.length}
         </span>
       </summary>
-      {#each layout.moduleCycles.slice(0, 6) as cycle, i (i)}
+      {#each moduleCycles.slice(0, 6) as cycle, i (i)}
         <div class="cyc"><button onclick={() => onSelect(cycle[0] ?? null)}>{cycle.join(' → ')} → {cycle[0]}</button></div>
       {/each}
     </details>
