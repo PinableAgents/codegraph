@@ -31,6 +31,7 @@ export interface SceneEdge extends GraphRelation {
   dashPattern?: number[];
   width: number; hot?: boolean; dimmed?: boolean; flowing?: boolean;
   path?: string; points?: [number, number][]; reverseCount?: number;
+  straight?: boolean;
   labelPoint?: Point;
   originalIds: string[];
   onHover?: (event: MouseEvent | null) => void;

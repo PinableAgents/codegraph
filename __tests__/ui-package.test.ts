@@ -21,7 +21,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-const g6Harness = vi.hoisted(() => ({ scene: null as any, events: null as any, destroyed: 0 }));
+const g6Harness = vi.hoisted(() => ({ scene: null as any, events: null as any, destroyed: 0, focused: [] as string[] }));
 // jsdom tests exercise the Svelte/adapter boundary; real Canvas rendering is checked in the browser.
 vi.mock('../ui/src/lib/g6-runtime', async () => {
   const { mount, unmount } = await import('svelte');
@@ -33,7 +33,7 @@ vi.mock('../ui/src/lib/g6-runtime', async () => {
       for (const mounted of this.html) await unmount(mounted); this.html = [];
       for (const node of scene.nodes) if (node.component) this.html.push(mount(node.component, { target: this.container, props: node.props }));
     }
-    async fit() {} async focus() {} async zoom() {} setMinimap() {} async collapse() {}
+    async fit() {} async focus(ids: string[]) {g6Harness.focused=ids;} async zoom() {} setMinimap() {} async collapse() {}
     async settled() {}
     select(id: string) { g6Harness.events.select(id); }
     viewport() { return { x: 0, y: 0, zoom: 1 }; }
@@ -489,6 +489,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  g6Harness.focused = [];
   g6Harness.scene = null; g6Harness.events = null;
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -1294,4 +1295,106 @@ it('紧凑排列期间切换选中对象，迟到Worker结果不能覆盖位置'
     expect(readGraphHistory(location.href).positions).toEqual({});
     expect(readGraphHistory(location.href).selected).toBe('src/http');
   } finally { globalThis.Worker = original; }
+});
+
+it('关系布局切换保留真实边，选择不重排，手动位置按布局隔离并恢复历史', async () => {
+  const { default: GraphCanvas } = await import('../ui/src/components/graph/GraphCanvas.svelte');
+  const { saveGraphHistory, readGraphHistory } = await import('../ui/src/lib/graph-history');
+  const scene: import('../ui/src/lib/graph-scene').GraphScene = {kind:'map',groups:[],
+    nodes:['a','b','c','d'].map((id,i)=>({id,label:id,sub:'',kind:'module',x:i*240,y:0,width:180,height:48,draggable:true})),
+    relations:[{id:'ab',source:'a',target:'b'}],edges:[{id:'ab',source:'a',target:'b',label:'1',width:1,originalIds:['ab'],path:'M180,24 L240,24',straight:true}]};
+  const originalPositions=scene.nodes.map(n=>[n.x,n.y]);
+  const selectMode=(mode:string)=>{const select=host.querySelector<HTMLSelectElement>('select[aria-label="图布局"]')!;select.value=mode;select.dispatchEvent(new Event('change',{bubbles:true}));flushSync();};
+  const ready=()=>vi.waitFor(()=>expect(host.querySelector('[data-graph-engine]')?.getAttribute('aria-busy')).toBe('false'));
+  saveGraphHistory(location.href,{relationshipLayout:'default',layoutPositions:{},collapsedGroups:[],selected:null,analysisFocus:false});
+  try {
+    await render(GraphCanvas,{scene});
+    selectMode('circular'); await ready();
+    expect(g6Harness.scene.nodes.map((n:any)=>[n.x,n.y])).not.toEqual(originalPositions);
+    expect(g6Harness.scene.relations).toEqual(scene.relations);
+    expect(g6Harness.scene.edges[0]).toMatchObject({path:undefined,straight:true,originalIds:['ab']});
+    const arranged=g6Harness.scene.nodes.map((n:any)=>[n.id,n.x,n.y]);
+    g6Harness.events.select('a');flushSync();
+    expect(g6Harness.scene.nodes.map((n:any)=>[n.id,n.x,n.y])).toEqual(arranged);
+    g6Harness.events.move('a',800,900);flushSync();
+    expect(readGraphHistory(location.href).layoutPositions?.circular?.a).toEqual({x:800,y:900});
+    selectMode('concentric');await ready();
+    expect(g6Harness.scene.nodes.find((n:any)=>n.id==='a').x).not.toBe(800);
+    selectMode('circular');await ready();
+    expect(g6Harness.scene.nodes.find((n:any)=>n.id==='a')).toMatchObject({x:800,y:900});
+    await unmount(mounted!);mounted=null;await render(GraphCanvas,{scene});await ready();
+    expect(host.querySelector<HTMLSelectElement>('select[aria-label="图布局"]')!.value).toBe('circular');
+    expect(g6Harness.scene.nodes.find((n:any)=>n.id==='a')).toMatchObject({x:800,y:900});
+    g6Harness.events.viewport({x:15,y:25,zoom:1});flushSync();
+    expect(host.querySelector<HTMLElement>('.graph-canvas')!.style.backgroundPosition).toBe('15px 25px');
+    expect(host.querySelector<HTMLElement>('.graph-canvas')!.style.backgroundSize).toBe('30px 30px');
+    [...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='恢复布局')!.click();flushSync();await ready();
+    expect(g6Harness.scene.nodes.map((n:any)=>[n.x,n.y])).toEqual(originalPositions);
+    expect(readGraphHistory(location.href).layoutPositions).toEqual({});
+  } finally { saveGraphHistory(location.href,{relationshipLayout:'default',layoutPositions:{},selected:null}); }
+});
+
+it('架构图最近查看最多十个，去重置顶，重开保留，点击展开并定位，跨范围隔离',async()=>{
+  const { default: GraphCanvas } = await import('../ui/src/components/graph/GraphCanvas.svelte');
+  const { saveGraphHistory, readGraphHistory } = await import('../ui/src/lib/graph-history');
+  const key=location.href;
+  const scene:import('../ui/src/lib/graph-scene').GraphScene={kind:'map',groups:[],relations:[],edges:[],
+    nodes:Array.from({length:12},(_,i)=>({id:`src/n${i}`,label:`节点 ${i}`,sub:'',kind:'module',x:i*220,y:0,width:180,height:48}))};
+  const recent=()=>[...host.querySelectorAll<HTMLButtonElement>('[data-recent-node]')];
+  saveGraphHistory(key,{relationshipLayout:'default',recentNodes:[],selected:null,collapsedGroups:[],analysisFocus:false});
+  try {
+    await render(GraphCanvas,{scene});expect(host.textContent).toContain('暂无记录');
+    for(const node of scene.nodes){g6Harness.events.select(node.id);flushSync();}
+    expect(recent().map(b=>b.dataset.recentNode)).toEqual(Array.from({length:10},(_,i)=>`src/n${11-i}`));
+    g6Harness.events.select('src/n5');flushSync();
+    expect(recent()).toHaveLength(10);expect(recent()[0]!.dataset.recentNode).toBe('src/n5');
+    g6Harness.events.select(null);flushSync();expect(recent()).toHaveLength(10);
+    await unmount(mounted!);mounted=null;
+    saveGraphHistory(key,{collapsedGroups:['directory:src']});
+    await render(GraphCanvas,{scene});
+    expect(recent()[0]!.dataset.recentNode).toBe('src/n5');
+    recent().find(b=>b.dataset.recentNode==='src/n2')!.click();flushSync();
+    await vi.waitFor(()=>expect(g6Harness.focused).toEqual(['src/n2']));
+    expect(readGraphHistory(key).selected).toBe('src/n2');
+    expect(readGraphHistory(key).collapsedGroups).toEqual([]);
+    expect(recent()[0]!.dataset.recentNode).toBe('src/n2');
+    await unmount(mounted!);mounted=null;
+    await render(GraphCanvas,{scene:{...scene,nodes:scene.nodes.filter(n=>n.id!=='src/n2')}});
+    expect(recent()[0]!.disabled).toBe(true);
+    await unmount(mounted!);mounted=null;
+    window.history.replaceState(null,'','#/p/recent-other/map');
+    await render(GraphCanvas,{scene});expect(recent()).toHaveLength(0);
+  } finally {
+    if(mounted){await unmount(mounted);mounted=null;}
+    window.history.replaceState(null,'',key);saveGraphHistory(key,{recentNodes:[],selected:null,collapsedGroups:[]});
+  }
+});
+
+it('切换关系布局取消旧Worker，折叠与选择不重排，卸载取消尚未完成的计算',async()=>{
+  const { default: GraphCanvas } = await import('../ui/src/components/graph/GraphCanvas.svelte');
+  const { saveGraphHistory } = await import('../ui/src/lib/graph-history');
+  const pending:ControlledWorker[]=[];
+  class ControlledWorker {
+    onmessage:((event:{data:{result:unknown}})=>void)|null=null;onerror=null;stopped=false;
+    postMessage(){pending.push(this);}terminate(){this.stopped=true;}
+  }
+  const original=globalThis.Worker;globalThis.Worker=ControlledWorker as unknown as typeof Worker;
+  const scene:import('../ui/src/lib/graph-scene').GraphScene={kind:'map',groups:[],relations:[],edges:[],
+    nodes:['src/a','src/b'].map(id=>({id,label:id,sub:'',kind:'module',x:0,y:0,width:180,height:48}))};
+  const selectMode=(mode:string)=>{const select=host.querySelector<HTMLSelectElement>('select[aria-label="图布局"]')!;select.value=mode;select.dispatchEvent(new Event('change',{bubbles:true}));flushSync();};
+  saveGraphHistory(location.href,{relationshipLayout:'default',layoutPositions:{},collapsedGroups:[],selected:null,analysisFocus:false});
+  try {
+    await render(GraphCanvas,{scene});
+    selectMode('force');expect(pending).toHaveLength(1);
+    selectMode('circular');expect(pending[0]!.stopped).toBe(true);expect(pending).toHaveLength(2);
+    pending[0]!.onmessage?.({data:{result:{'src/a':{x:9999,y:9999},'src/b':{x:9999,y:9999}}}});flushSync();
+    expect(host.querySelector('[data-graph-engine]')?.getAttribute('aria-busy')).toBe('true');
+    pending[1]!.onmessage?.({data:{result:{'src/a':{x:100,y:100},'src/b':{x:400,y:100}}}});flushSync();
+    expect(g6Harness.scene.nodes[0].x).toBe(100);
+    g6Harness.events.select('src/a');flushSync();expect(pending).toHaveLength(2);
+    [...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent?.includes('src · 2'))!.click();flushSync();
+    expect(pending).toHaveLength(2);
+    selectMode('force');expect(pending).toHaveLength(3);
+    await unmount(mounted!);mounted=null;expect(pending[2]!.stopped).toBe(true);
+  } finally {globalThis.Worker=original;saveGraphHistory(location.href,{relationshipLayout:'default',layoutPositions:{},collapsedGroups:[],selected:null});}
 });

@@ -348,7 +348,7 @@
             </div>
             <div class="lrow">
               <span class="k-box k-entry mono"><span class="mark">●</span>/</span>
-              <span>The entry screen; each row down is one more transition away</span>
+              <span>{graphText('入口页面；分层布局中每向下一层就多一次跳转', 'Entry screen; in the hierarchical layout each layer is one more transition away')}</span>
             </div>
             <div class="lrow">
               <span class="k-box k-origin mono">fn()</span>
@@ -474,7 +474,7 @@
             · <b>{payload.origins.length}</b> triggered outside a screen{/if}.
         </p>
         <p class="dim">
-          <span class="mark">●</span> {graphText('入口页面在上方，逐层展示页面跳转。选中页面查看相邻关系，悬停连线或详情行查看条件及调用来源。', 'Entry screens are at the top, with transitions on successive layers. Select a screen for adjacent relationships; hover an edge or detail row for conditions and call origins.')}
+          <span class="mark">●</span> {graphText('默认从入口页面逐层展示跳转，也可切换力导向、同心圆或环形。选中页面查看相邻关系，悬停连线或详情行查看条件及调用来源。', 'The default layout layers transitions from entry screens; force-directed, concentric and circular layouts are also available. Select a screen for adjacent relationships; hover an edge or detail row for conditions and call origins.')}
         </p>
         <p class="dim">
           {graphText('实线表示直接跳转，虚线表示经返回值等方式推导的关系。箭头保留跳转方向，循环由真实有向关系计算。虚线节点表示共享入口、未到达页面或页面边界。', 'Solid edges represent direct transitions; dashed edges represent synthesized relationships. Arrows retain navigation direction; cycles are computed from real directed relationships. Dashed nodes indicate shared origins, unreached screens or boundaries.')}

@@ -3,8 +3,13 @@ import type { SceneNode, SceneEdge } from './graph-scene';
 /** Shared occupancy grid. Runs in a cancellable Worker, never once per edge on the UI thread. */
 export function routeScene(nodes: Pick<SceneNode, 'id'|'x'|'y'|'width'|'height'>[], edges: Pick<SceneEdge,'id'|'source'|'target'>[]) {
   if (!nodes.length) return {};
-  const margin = 48, step = 16;
+  const margin = 48;
   const left = Math.min(...nodes.map(n=>n.x))-margin, top = Math.min(...nodes.map(n=>n.y))-margin;
+  const spanX = Math.max(...nodes.map(n=>n.x+n.width))-left+margin;
+  const spanY = Math.max(...nodes.map(n=>n.y+n.height))-top+margin;
+  // A large circular layout has a mostly empty centre. Keep memory bounded while
+  // retaining enough resolution for the 48px cards and their obstacle padding.
+  const step = (Math.ceil(spanX/16)+1)*(Math.ceil(spanY/16)+1) > 2_000_000 ? 32 : 16;
   const width = Math.ceil((Math.max(...nodes.map(n=>n.x+n.width))-left+margin)/step)+1;
   const height = Math.ceil((Math.max(...nodes.map(n=>n.y+n.height))-top+margin)/step)+1;
   if (width*height > 2_000_000) throw new Error('布局跨度过大，请恢复布局或缩小范围。 Layout span exceeds routing budget.');
@@ -35,8 +40,11 @@ export function routeScene(nodes: Pick<SceneNode, 'id'|'x'|'y'|'width'|'height'>
     ++stamp;
     const goals=new Set(ends.map(p=>p.id)),heap:{id:number;cost:number;g:number}[]=[];
     const h=(id:number)=>Math.min(...ends.map(p=>Math.abs(id%width-p.id%width)+Math.abs(Math.floor(id/width)-Math.floor(p.id/width))));
-    function push(item:typeof heap[number]) { let i=heap.length;heap.push(item);while(i>0){const p=(i-1)>>1;if(heap[p]!.cost<=item.cost)break;heap[i]=heap[p]!;i=p;}heap[i]=item; }
-    function pop(){const first=heap[0]!,last=heap.pop()!;if(heap.length){let i=0;while(i*2+1<heap.length){let c=i*2+1;if(c+1<heap.length&&heap[c+1]!.cost<heap[c]!.cost)c++;if(heap[c]!.cost>=last.cost)break;heap[i]=heap[c]!;i=c;}heap[i]=last;}return first;}
+    // Prefer progress toward the goal for equal A* scores, avoiding breadth-first
+    // expansion across the empty centre of a ring. IDs make ties deterministic.
+    const order=(a:typeof heap[number],b:typeof heap[number])=>a.cost-b.cost || b.g-a.g || a.id-b.id;
+    function push(item:typeof heap[number]) { let i=heap.length;heap.push(item);while(i>0){const p=(i-1)>>1;if(order(heap[p]!,item)<=0)break;heap[i]=heap[p]!;i=p;}heap[i]=item; }
+    function pop(){const first=heap[0]!,last=heap.pop()!;if(heap.length){let i=0;while(i*2+1<heap.length){let c=i*2+1;if(c+1<heap.length&&order(heap[c+1]!,heap[c]!)<0)c++;if(order(heap[c]!,last)>=0)break;heap[i]=heap[c]!;i=c;}heap[i]=last;}return first;}
     for(const start of starts){visited[start.id]=stamp;distance[start.id]=0;parent[start.id]=-1;push({id:start.id,g:0,cost:h(start.id)});}
     let found=-1,loops=0;
     while(heap.length&&loops++<100_000){const item=pop(),id=item.id;if(item.g!==distance[id])continue;if(goals.has(id)){found=id;break;}

@@ -9,8 +9,12 @@ class RoutedEdge extends Polyline {
   private routeKey = '';
   private routePath: any;
   protected getKeyPath(attributes: any): any {
-    const key = JSON.stringify([attributes.routeEpoch, this.getEndpoints(attributes, false)]);
-    if (key !== this.routeKey) { this.routePath = super.getKeyPath(attributes); this.routeKey = key; }
+    const endpoints = this.getEndpoints(attributes);
+    const key = JSON.stringify([attributes.routeEpoch, attributes.straight, endpoints]);
+    if (key !== this.routeKey) {
+      this.routePath = attributes.straight ? [['M', ...endpoints[0]], ['L', ...endpoints[1]]] : super.getKeyPath(attributes);
+      this.routeKey = key;
+    }
     attributes.capturePath?.(this.routePath); return this.routePath;
   }
   protected getLoopPath(attributes:any):any {const path=super.getLoopPath(attributes);attributes.capturePath?.(path);return path;}
@@ -76,7 +80,7 @@ export class G6Runtime implements GraphController {
   constructor(private container: HTMLElement, private events: RuntimeEvents, private initialViewport?: Viewport, private fitInitially = true) {
     this.readTheme();
     this.graph = new Graph({ container, width: Math.max(1, container.clientWidth), height: Math.max(1, container.clientHeight),
-      animation: false, padding: [90, 36, 50, 36], zoomRange: [.05, 3],
+      animation: false, padding: [90, 36, 50, 36], zoomRange: [.005, 3],
       node: { type: datum => datum.data?.html ? 'html' : 'rect',
         state: { selected: { stroke: this.colors.accent, lineWidth: 2.5,halo:true,haloLineWidth:6,haloStroke:this.colors.accent,haloOpacity:.2 }, active: { stroke: this.colors.accent, lineWidth: 2.5 }, dimmed: { opacity: .25 } } },
       edge: { type: datum => datum.data?.semantic ? 'codegraph-semantic' : 'codegraph-routed',
@@ -119,7 +123,7 @@ export class G6Runtime implements GraphController {
     const generation = ++this.generation;
     this.scene = scene; this.collapsed = new Set(collapsed); this.highlighted = new Set(highlighted);
     const geometry = JSON.stringify([scene.nodes.map(n => [n.id, n.x, n.y, n.width, n.height, n.label, n.sub, n.group, n.dashed,n.cyclic]),
-      scene.edges.map(e => [e.id, e.source, e.target, e.path, e.points, e.reverseCount]), scene.groups, [...collapsed]]);
+      scene.edges.map(e => [e.id, e.source, e.target, e.path, e.points, e.reverseCount,e.straight]), scene.groups, [...collapsed]]);
     return this.enqueue(async () => {
       if (generation !== this.generation) return;
       if (geometry !== this.geometry) {
@@ -127,7 +131,7 @@ export class G6Runtime implements GraphController {
         const ids = new Set(scene.nodes.map(n => n.id));
         for (const [id, entry] of this.mounts) if (!ids.has(id)) { void unmount(entry.instance); this.mounts.delete(id); }
         let routes: Record<string, [number, number][]> = {};
-        if (scene.edges.filter(e => !e.path).length > 100) {
+        if (scene.edges.filter(e => !e.path && !e.straight).length > 100) {
           const folded = new Set(scene.groups.filter(g=>collapsed.has(g.id)).flatMap(g=>g.members));
           const routeNodes = scene.nodes.filter(n=>!folded.has(n.id)).map(n=>({id:n.id,x:n.x,y:n.y,width:n.width,height:n.height}));
           for (const group of scene.groups.filter(g=>collapsed.has(g.id))) {
@@ -137,7 +141,7 @@ export class G6Runtime implements GraphController {
             routeNodes.push({id:group.id,x:x-100,y:y-24,width:200,height:48});
           }
           routes = await new Promise((resolve,reject)=> {
-            const cancel=requestLayout<Record<string,[number,number][]>>('scene-routes',{nodes:routeNodes,edges:scene.edges.filter(e=>!e.path).map(e=>({id:e.id,source:e.source,target:e.target}))},{},resolve,reject);
+            const cancel=requestLayout<Record<string,[number,number][]>>('scene-routes',{nodes:routeNodes,edges:scene.edges.filter(e=>!e.path&&!e.straight).map(e=>({id:e.id,source:e.source,target:e.target}))},{},resolve,reject);
             this.cancelRoutes=()=>{cancel();resolve({});};
           });
           this.cancelRoutes=undefined;
@@ -212,7 +216,7 @@ export class G6Runtime implements GraphController {
       lineDash: e.dashPattern ?? (e.dashed ? [5, 3] : []), endArrow: e.arrow !== false, startArrow: !!e.reverseCount,
       endArrowSize: 7, startArrowSize: 7, radius: 6,
       router: routes[e.id] ? false : { type: 'shortest-path', enableObstacleAvoidance: true, offset: 12, gridSize: 24, maximumLoops: 600 },
-      routeEpoch: this.generation,
+      routeEpoch: this.generation, straight: e.straight,
       controlPoints: routes[e.id] ?? e.points ?? [], scenePath: e.path ? parseScenePath(e.path) : [],
       capturePath: (path: any[]) => this.paths.set(e.id, path.map(command => command.join(' ')).join(' ')),
       captureLabel: (style:any) => {const t=style.transform?.find((p:any[])=>p[0]==='translate');this.labelPoints.set(e.id,{x:t?.[1]??style.x??0,y:t?.[2]??style.y??0});},
@@ -261,7 +265,7 @@ export class G6Runtime implements GraphController {
   }
   async fit() { if (!this.closed && this.rendered) { await this.graph.fitView({ when: 'always' }, false); if (this.graph.getZoom() > 1) await this.graph.zoomTo(1, false); } }
   async focus(ids: string[]) { if (!this.closed && this.rendered && ids.length) await this.graph.focusElement(ids, false); }
-  async zoom(value: number) { if (!this.closed && this.rendered) await this.graph.zoomTo(Math.max(.05, Math.min(3, value)), false); }
+  async zoom(value: number) { if (!this.closed && this.rendered) await this.graph.zoomTo(Math.max(.005, Math.min(3, value)), false); }
   viewport(): Viewport { if(!this.rendered) return this.initialViewport ?? {x:0,y:0,zoom:1}; const p = this.graph.getViewportByCanvas([0, 0]); return { x: p[0], y: p[1], zoom: this.graph.getZoom() }; }
   select(id: string | null) { const node = this.scene.nodes.find(n => n.id === id); if(node?.decorative)return;node?.onSelect?.(node.id); this.events.select(id); }
   async collapse(id: string, collapsed: boolean) { if (collapsed) this.collapsed.add(id); else this.collapsed.delete(id); await this.update(this.scene, this.collapsed, this.highlighted); }

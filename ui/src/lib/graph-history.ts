@@ -1,4 +1,7 @@
 export interface GraphHistory {
+  recentNodes?: { id: string; label: string }[];
+  relationshipLayout?: import('./relationship-layout').RelationshipLayout;
+  layoutPositions?: Partial<Record<import('./relationship-layout').RelationshipLayout, Record<string, {x: number; y: number}>>>;
   collapsedGroups?: string[];
   grouping?: 'directory' | 'cycles';
   analysisDirection?: 'in' | 'out' | 'both';

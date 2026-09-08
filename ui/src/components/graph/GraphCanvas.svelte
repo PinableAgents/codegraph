@@ -6,21 +6,35 @@
   import { oneHop } from '../../lib/graph-budget';
   import { readGraphHistory, saveGraphHistory } from '../../lib/graph-history';
   import { graphText as t } from '../../lib/graph-copy';
+  import { requestLayout } from '../../lib/graph-layout';
+  import type { LayoutPositions, RelationshipLayout, RelationshipLayoutInput } from '../../lib/relationship-layout';
 
   let { scene, selected, onSelect = () => {}, onMove = () => {}, onViewport = () => {}, onReset = () => {}, onVisibleChange = () => {},
     locate = null, fitRequest = null, controller = $bindable(null), fitInitially = true,
-    direction = $bindable('both'), focusOnly = $bindable(false) }:
+    direction = $bindable('both'), focusOnly = $bindable(false), layoutMode = $bindable<RelationshipLayout>('default') }:
     { scene: GraphScene; selected?: string | null; onSelect?: (id: string | null) => void;
       onMove?: (id: string, x: number, y: number) => void; onViewport?: (viewport: Viewport) => void; onReset?: () => void;
       onVisibleChange?: (counts:{nodes:number;edges:number})=>void;
       locate?: { id: string } | null; fitRequest?: object | null; controller?: GraphController | null; fitInitially?: boolean;
-      direction?: 'in' | 'out' | 'both'; focusOnly?: boolean } = $props();
+      direction?: 'in' | 'out' | 'both'; focusOnly?: boolean; layoutMode?: RelationshipLayout } = $props();
   let host: HTMLDivElement;
+  let recentStrip = $state<HTMLDivElement>();
+  let disposed = false;
   let runtime = $state.raw<G6Runtime | null>(null);
   let error = $state('');
   let query = $state(''), from = $state(''), to = $state(''), notice = $state('');
   const key = typeof location === 'undefined' ? '' : location.href;
   const history = untrack(() => readGraphHistory(key));
+  let recentNodes = $state(history.recentNodes ?? []);
+  const supportsLayouts = $derived(scene.kind === 'map' || scene.kind === 'screens');
+  layoutMode = untrack(() => supportsLayouts) ? history.relationshipLayout ?? untrack(()=>layoutMode) : 'default';
+  let layoutPositions = $state(history.layoutPositions ?? {});
+  let placement = $state.raw<{key: string; positions: LayoutPositions} | null>(null);
+  let layoutBusy = $state(false), layoutError = $state('');
+  let pendingLayout: Promise<void> = Promise.resolve();
+  let fitAfterLayout = false;
+  let gridViewport = $state<Viewport>(history.viewport ?? { x: 0, y: 0, zoom: 1 });
+  const gridSize = $derived(30 * gridViewport.zoom * 2 ** Math.max(0, Math.ceil(Math.log2(16 / (30 * gridViewport.zoom)))));
   let localSelected = $state<string | null>(history.selected ?? null);
   const current = $derived(selected === undefined ? localSelected : selected);
   let collapsed = $state<string[]>(history.collapsedGroups ?? []);
@@ -39,14 +53,48 @@
     : scene.groups);
   const focus = $derived(focusOnly ? oneHop(current, scene.relations, direction) : null);
   const projected = $derived(projectScene({...scene,nodes:scene.nodes.map(n=>({...n,cyclic:cycleMembers.has(n.id)}))}, groups, new Set(collapsed), focus));
+  const projectedIds = $derived(new Set(projected.nodes.map(n=>n.id)));
+  // Selection, hover, folding, playback and manual positions do not restart the layout Worker.
+  const layoutKey = $derived(JSON.stringify({ nodes: projected.nodes.map(n => ({id:n.id,width:n.width,height:n.height})),
+    relations: scene.relations.filter(e => projectedIds.has(e.source) && projectedIds.has(e.target)).map(e=>({id:e.id,source:e.source,target:e.target})),
+    groups: projected.groups.map(g=>({id:g.id,members:g.members})) } satisfies RelationshipLayoutInput));
+  const displayed = $derived<GraphScene>(layoutMode === 'default' || placement?.key !== `${layoutMode}:${layoutKey}` ? projected : {
+    ...projected, nodes: projected.nodes.map(n=>({...n,...placement!.positions[n.id],...layoutPositions[layoutMode]?.[n.id]})),
+    edges: projected.edges.map(e=>({...e,path:undefined,points:undefined,labelPoint:undefined})),
+  });
   const matches = $derived(realNodes.filter(n => n.label.toLowerCase().includes(query.toLowerCase())).slice(0, query ? 20 : 0));
 
-  function choose(id: string | null) { localSelected = id; onSelect(id); }
+  function move(id: string, x: number, y: number) {
+    if (layoutMode === 'default') onMove(id, x, y);
+    else layoutPositions = {...layoutPositions,[layoutMode]:{...layoutPositions[layoutMode],[id]:{x,y}}};
+  }
+  async function settled() {
+    while (!disposed) {
+      await tick(); const pending = pendingLayout; await pending; await tick();
+      if (pending !== pendingLayout) continue;
+      await runtime?.settled(); if (pending === pendingLayout) return;
+    }
+  }
+  async function restore() {
+    fitAfterLayout = true; layoutMode = 'default'; layoutPositions = {};
+    onReset(); collapsed = []; focusOnly = false;
+    await settled(); await runtime?.fit();
+  }
+  function remember(id: string | null) {
+    if (scene.kind !== 'map' || !id) return;
+    const node = realNodes.find(n=>n.id===id);
+    if (!node || (recentNodes[0]?.id === id && recentNodes[0]?.label === node.label)) return;
+    recentNodes = [{id, label:node.label}, ...recentNodes.filter(n=>n.id!==id)].slice(0,10);
+    void tick().then(()=>{if (recentStrip && !disposed) recentStrip.scrollLeft = 0;});
+  }
+  function choose(id: string | null) { remember(id); localSelected = id; onSelect(id); }
+  // Also capture selections made by the Map details panel or restored by its parent.
+  $effect(() => { const id = current; untrack(()=>remember(id)); });
   async function reveal(ids: string[]) {
     focusOnly = false;
     const set = new Set(ids);
     collapsed = collapsed.filter(id => !groups.find(g => g.id === id)?.members.some(member => set.has(member)));
-    await tick(); await runtime?.settled();
+    await settled();
     await runtime?.focus(ids);
   }
   function findPath() {
@@ -64,34 +112,51 @@
   }
   function toggleGroup(id: string) { collapsed = collapsed.includes(id) ? collapsed.filter(x => x !== id) : [...collapsed, id]; }
   $effect(() => {
-    const next = projected, hidden = new Set(collapsed), active = new Set(highlighted);
+    const mode = layoutMode, signature = layoutKey;
+    layoutError = '';
+    if (mode === 'default') { placement = null; layoutBusy = false; return; }
+    layoutBusy = true;
+    const started = performance.now();
+    let finish!: () => void;
+    pendingLayout = new Promise(resolve => finish = resolve);
+    const cancel = requestLayout<LayoutPositions>('relationships', JSON.parse(signature), {mode}, positions => {
+      if (host) host.dataset.graphLayoutMs = String(Math.round(performance.now() - started));
+      placement = {key:`${mode}:${signature}`,positions}; layoutBusy = false; finish();
+    }, message => { layoutError = message; layoutBusy = false; finish(); });
+    return () => { cancel(); finish(); };
+  });
+  $effect(() => {
+    const next = displayed, hidden = new Set(collapsed), active = new Set(highlighted), graph = runtime;
     if (current) active.add(current);
-    void runtime?.update(next, hidden, active);
+    if (layoutBusy || layoutError) return;
+    const fit = fitAfterLayout, signature = `${layoutMode}:${layoutKey}`; fitAfterLayout = false;
+    void graph?.update(next, hidden, active).then(() => !disposed && fit && signature === `${layoutMode}:${layoutKey}` ? graph.fit() : undefined);
   });
   $effect(()=>{const folded=projected.groups.filter(g=>collapsed.includes(g.id));const hidden=new Set(folded.flatMap(g=>g.members));onVisibleChange({nodes:projected.nodes.filter(n=>!hidden.has(n.id)).length+folded.length,edges:projected.edges.length});});
   $effect(() => { if (runtime) runtime.setMinimap(minimap); });
   $effect(() => { if (locate && runtime) { const id = locate.id; untrack(() => void reveal([id])); } });
-  $effect(() => { if (fitRequest && runtime) untrack(() => void runtime?.fit()); });
+  $effect(() => { if (fitRequest && runtime) untrack(() => void settled().then(()=>runtime?.fit())); });
   const analysisKey = $derived(JSON.stringify([nodeIds, scene.relations]));
   $effect(() => { void analysisKey; highlighted = []; notice = ''; cycleChoice = ''; });
   $effect(()=>{if(focusOnly){void direction;void current;highlighted=[];notice='';cycleChoice='';}});
-  $effect(() => saveGraphHistory(key, { selected:current,collapsedGroups: collapsed, grouping, analysisDirection: direction, analysisFocus: focusOnly }));
+  $effect(() => saveGraphHistory(key, { selected:current,collapsedGroups: collapsed, grouping, analysisDirection: direction, analysisFocus: focusOnly, relationshipLayout:layoutMode, layoutPositions, recentNodes }));
   onMount(() => {
     let active = true;
     void import('../../lib/g6-runtime').then(({ G6Runtime }) => {
       if (!active) return;
-      runtime = new G6Runtime(host, { select: choose, move: onMove, error: message => error = message,
-        viewport: view => { zoomValue = view.zoom; onViewport(view); saveGraphHistory(key, { viewport: view }); } }, history.viewport, fitInitially);
+      runtime = new G6Runtime(host, { select: choose, move, error: message => error = message,
+        viewport: view => { zoomValue = view.zoom; gridViewport = view; onViewport(view); saveGraphHistory(key, { viewport: view }); } }, history.viewport, fitInitially);
       const graph=runtime;
       controller = {fit:()=>graph.fit(),focus:reveal,zoom:value=>graph.zoom(value),viewport:()=>graph.viewport(),select:id=>graph.select(id),
-        collapse:async(id,value)=>{collapsed=value?[...new Set([...collapsed,id])]:collapsed.filter(key=>key!==id);await tick();await graph.settled();},
+        collapse:async(id,value)=>{collapsed=value?[...new Set([...collapsed,id])]:collapsed.filter(key=>key!==id);await settled();},
         snapshot:()=>graph.snapshot(),exportSvg:scale=>graph.exportSvg(scale)};
     }).catch(reason => error = String(reason));
-    return () => { active = false; runtime?.destroy(); runtime = null; controller = null; };
+    return () => { disposed = true; active = false; runtime?.destroy(); runtime = null; controller = null; };
   });
 </script>
 
-<div class="graph-canvas" data-graph-engine="g6">
+<div class="graph-canvas" data-graph-engine="g6" data-layout={layoutMode} aria-busy={layoutBusy}
+  style:background-size={`${gridSize}px ${gridSize}px`} style:background-position={`${gridViewport.x}px ${gridViewport.y}px`}>
   <div class="surface" bind:this={host}></div>
   <div class="toolbar" role="toolbar" aria-label={t('图分析工具', 'Graph analysis tools')}>
     <div class="find">
@@ -102,7 +167,15 @@
     <button onclick={() => runtime?.fit()}>{t('适应画布', 'Fit view')}</button>
     <button disabled={!current} onclick={() => current && reveal([current])}>{t('定位选中', 'Focus selection')}</button>
     <button aria-pressed={minimap} onclick={() => minimap = !minimap}>{t('缩略图', 'Minimap')}</button>
-    <button onclick={async()=>{onReset();collapsed=[];focusOnly=false;await tick();await runtime?.settled();await runtime?.fit();}}>{t('恢复布局', 'Restore layout')}</button>
+    {#if supportsLayouts}
+      <select aria-label={t('图布局', 'Graph layout')} value={layoutMode} onchange={e=>{fitAfterLayout=true;layoutMode=e.currentTarget.value as RelationshipLayout;}}>
+        <option value="default">{t('分层', 'Hierarchical')}</option>
+        <option value="force">{t('力导向', 'Force-directed')}</option>
+        <option value="concentric">{t('同心圆', 'Concentric')}</option>
+        <option value="circular">{t('环形', 'Circular')}</option>
+      </select>
+    {/if}
+    <button onclick={restore}>{t('恢复布局', 'Restore layout')}</button>
     <details>
       <summary>{t('分析', 'Analyze')}</summary>
       <div class="analysis">
@@ -124,21 +197,40 @@
         <button onclick={() => collapsed = []}>{t('展开所有分组', 'Expand all')}</button>
       </div>
     </details>
+    {#if scene.kind === 'map'}
+      <div class="recent" role="group" aria-label={t('最近查看的节点', 'Recently viewed nodes')}>
+        <span>{t('最近查看', 'Recent')}</span>
+        <div class="recent-items" bind:this={recentStrip}>
+          {#each recentNodes as node (node.id)}
+            <button data-recent-node={node.id} aria-pressed={current===node.id} disabled={!nodeIds.includes(node.id)}
+              title={nodeIds.includes(node.id) ? node.id : `${node.id} · ${t('不在当前范围内', 'Outside the current scope')}`}
+              onclick={()=>{choose(node.id);void reveal([node.id]);}}>{node.label}</button>
+          {:else}<span class="recent-empty">{t('暂无记录', 'No history yet')}</span>{/each}
+        </div>
+      </div>
+    {/if}
   </div>
   {#if notice}<div class="notice" role="status">{notice}</div>{/if}
-  {#if error}<div class="error" role="alert">{error}</div>{/if}
+  {#if layoutBusy}<div class="notice" role="status">{t('正在计算布局…', 'Calculating layout…')}</div>{/if}
+  {#if error || layoutError}<div class="error" role="alert">{layoutError || error}</div>{/if}
   <div class="zoom"><button aria-label={t('放大', 'Zoom in')} onclick={() => runtime?.zoom(zoomValue * 1.25)}>＋</button><button aria-label={t('缩小', 'Zoom out')} onclick={() => runtime?.zoom(zoomValue / 1.25)}>−</button></div>
   <details class="accessible"><summary>{t('节点列表／键盘导航', 'Node list / keyboard navigation')}</summary><div class="analysis">{#each realNodes as n (n.id)}<button aria-pressed={n.id === current} onclick={() => { choose(n.id); void reveal([n.id]); }} onkeydown={e => {
     if (!e.altKey || !n.draggable) return;
     const delta: Record<string, [number, number]> = { ArrowLeft: [-10, 0], ArrowRight: [10, 0], ArrowUp: [0, -10], ArrowDown: [0, 10] };
-    const d = delta[e.key]; if (d) { e.preventDefault(); onMove(n.id, n.x + d[0], n.y + d[1]); }
+    const d = delta[e.key], position = displayed.nodes.find(node=>node.id===n.id) ?? n;
+    if (d) { e.preventDefault(); move(n.id, position.x + d[0], position.y + d[1]); }
   }}>{n.label}</button>{/each}</div></details>
 </div>
 
 <style>
-  .graph-canvas,.surface{position:absolute;inset:0}.graph-canvas{background:var(--paper);overflow:hidden}.surface{touch-action:none}
+  .graph-canvas,.surface{position:absolute;inset:0}
+  .graph-canvas{background-color:var(--paper);background-image:linear-gradient(to right,var(--route-grid) 1px,transparent 1px),linear-gradient(to bottom,var(--route-grid) 1px,transparent 1px);overflow:hidden}
+  .surface{touch-action:none}
   .surface :global([data-graph-cycle=true])::after{content:'↻';position:absolute;right:4px;top:-15px;font:14px monospace;color:var(--ink-2);background:var(--paper)}
   .toolbar{position:absolute;z-index:10;top:12px;left:12px;right:12px;display:flex;flex-wrap:wrap;gap:5px;pointer-events:none}.toolbar>*{pointer-events:auto}
+  .recent{display:flex;align-items:center;gap:8px;flex:1 1 220px;min-width:0;font:12px var(--sans);color:var(--ink-2)}
+  .recent>span{flex:none}.recent-items{display:flex;align-items:center;gap:5px;overflow-x:auto;min-width:0;scrollbar-width:thin}
+  .recent-items button{flex:none;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.recent-empty{white-space:nowrap;color:var(--ink-3)}
   input,button,select,summary{font:12px var(--sans);color:var(--ink);background:var(--paper-2);border:1px solid var(--rule-soft);border-radius:4px;padding:7px;box-sizing:border-box;min-height:32px}
   button,summary{cursor:pointer}button:disabled{opacity:.4}button[aria-pressed=true]{border-color:var(--route-main)}
   select{max-width:300px}.find{position:relative}.find input{width:130px}.results,.analysis{background:var(--paper-2);border:1px solid var(--rule-soft);padding:8px;max-height:50vh;overflow:auto;display:flex;flex-direction:column;gap:7px}

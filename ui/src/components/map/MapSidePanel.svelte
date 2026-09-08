@@ -89,7 +89,7 @@
 <aside class="mapside">
   <h2>Architecture map</h2>
   <p>
-    {graphText('依赖从左向右分层，循环内部稳定排列。箭头从调用或依赖方指向目标，双向依赖合并为双箭头；悬停显示各方向数量。拖动节点可整理位置，播放仅示意静态关系。', 'Dependencies are layered left to right, with stable positions within cycles. Arrows point from caller or dependent to target; mutual dependencies share a double arrow. Hover for directional counts. Drag to arrange; playback illustrates static relationships.')}
+    {graphText('默认从左向右分层，也可切换力导向、同心圆或环形。同心圆按连接数量排列，连接多的节点更靠内。箭头从调用或依赖方指向目标，双向依赖合并为双箭头；悬停显示各方向数量。拖动节点可整理位置，播放仅示意静态关系。', 'The default layout is left to right; force-directed, concentric and circular layouts are also available. Concentric rings place nodes with more neighbours closer to the centre. Arrows point from caller or dependent to target; mutual dependencies share a double arrow. Hover for directional counts. Drag to arrange; playback illustrates static relationships.')}
   </p>
 
   <!-- The map is the thing people paste into a README, so the way out sits

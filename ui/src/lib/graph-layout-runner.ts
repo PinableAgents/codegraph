@@ -9,6 +9,13 @@ import { routeScene } from './graph-routing';
 import type { WireMapPayload, WireScreensPayload, WireStepsPayload, WireFlow } from './wire';
 /** Rendering layout is async; the pure semantic builder remains reusable and testable. */
 export async function calculateRenderLayout(kind: string, payload: unknown, options: Record<string, unknown>) {
+  if (kind === 'relationships') {
+    const data = payload as import('./relationship-layout').RelationshipLayoutInput;
+    assertBudget(graphBudget(data.nodes.length, data.relations.length));
+    if (!['force', 'concentric', 'circular'].includes(String(options.mode))) throw new Error('Unknown relationship layout');
+    const { layoutRelationships } = await import('./relationship-layout');
+    return layoutRelationships(data, options.mode as 'force' | 'concentric' | 'circular');
+  }
   const result = calculateLayout(kind, payload, options);
   if (kind === 'map') {
     const { layoutArchitecture } = await import('./g6-layout');

@@ -40,7 +40,7 @@ export function graphScene(kind: GraphScene['kind'], nodes: Node[], edges: Edge[
       dashed: !!(link?.dash || d.info?.synthesized), arrow: !link?.cap,
       dashPattern:link?.dash ? String(link.dash).split(/[ ,]+/).map(Number) : undefined,
       hot: !!(d.focus || d.hot), dimmed: d.dimmed, flowing: d.flowing,
-      path, points: d.edge?.controlPoints,
+      path, points: d.edge?.controlPoints, straight: kind === 'map' && d.edgeStyle === 'straight',
       onHover: d.onHover ? event => d.onHover(event ? d.edge : null, event) : undefined,
     };
   });

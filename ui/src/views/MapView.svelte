@@ -15,6 +15,7 @@
   import { buildMapIndex, indexedOneHop, cachedPresentation, mapNodeMeasurements, positionedMapPoints } from '../lib/map-index';
   import { requestLayout } from '../lib/graph-layout';
   import GraphCanvas from '../components/graph/GraphCanvas.svelte';
+  import type { RelationshipLayout } from '../lib/relationship-layout';
   import { graphScene } from '../lib/graph-adapters';
   import type { Node, Edge, GraphController } from '../lib/graph-scene';
   import MapSidePanel from '../components/map/MapSidePanel.svelte';
@@ -35,6 +36,7 @@
   }
 
   let { root, depth, tests }: Props = $props();
+  let relationshipLayout = $state<RelationshipLayout>('default');
 
   let visibleCounts = $state<{nodes:number;edges:number}|null>(null);
   let payload = $state<WireMapPayload | null>(null);
@@ -169,6 +171,7 @@
 
   function compactVisible(): void {
     if (!layout || !selected || !focusOnly) return;
+    relationshipLayout = 'default';
     hovered = null;
     compactRequest = { layout, direction: focusDirection, input: {
       selected,
@@ -269,7 +272,7 @@
   <label>{graphText('连线', 'Edges')} <select aria-label={graphText('连线样式', 'Edge style')} bind:value={edgeStyle}><option value="curve">{graphText('圆角折线', 'Rounded polyline')}</option><option value="straight">{graphText('直线', 'Straight')}</option></select></label>
   <button disabled={!focusOnly || !selected || !layout || !!compactRequest} title={graphText('选中节点并开启只看聚焦后，重新排列当前可见节点，缩短长距离连线。', 'Select a node and enable Focus only to arrange visible nodes closer together.')} onclick={compactVisible}>{compactRequest ? graphText('排列中…', 'Arranging…') : graphText('紧凑排列', 'Compact layout')}</button>
   <button disabled={!layout} aria-pressed={flowPlaying} onclick={() => flowPlaying = !flowPlaying}>{flowPlaying ? graphText('暂停流向', 'Pause flow') : graphText('播放流向', 'Play flow')}</button>
-  <button disabled={!manuallyPlaced} onclick={() => { compactRequest = null; positions = {}; }}>{graphText('恢复自动布局', 'Reset layout')}</button>
+  <button disabled={!manuallyPlaced && relationshipLayout === 'default'} onclick={() => { compactRequest = null; positions = {}; relationshipLayout = 'default'; fitRequest = {}; }}>{graphText('恢复自动布局', 'Reset layout')}</button>
 </div>
 <p class="compact-note">{graphText('拖动节点整理链路；Alt + 方向键微调。箭头 A → B 表示 A 调用或依赖 B，动画不代表运行时数据。', 'Drag nodes to arrange links; use Alt + arrow keys to nudge. A → B means A calls or depends on B; animation does not represent runtime data.')} {manuallyPlaced ? graphText('当前为手动排列。', 'Manually arranged.') : graphText('当前为自动布局。', 'Automatic layout.')}{#if flowPlaying && visibleEdges.length > 200} {graphText('仅播放前 200 条关系；选中节点可聚焦局部流向。', 'Playing the first 200 relationships; select a node to focus the flow.')}{/if}</p>
 <div class="mapview">
@@ -295,7 +298,7 @@
         </p>
       </div>
     {:else if layout !== null}
-      <GraphCanvas scene={canvasScene} onVisibleChange={counts=>visibleCounts=counts} {selected} {locate} {fitRequest} bind:controller={graphController} bind:direction={focusDirection} bind:focusOnly
+      <GraphCanvas scene={canvasScene} onVisibleChange={counts=>visibleCounts=counts} {selected} {locate} {fitRequest} bind:controller={graphController} bind:direction={focusDirection} bind:focusOnly bind:layoutMode={relationshipLayout}
         onReset={()=>{compactRequest=null;positions={};}}
         onSelect={id => { selected = id; hovered = null; }}
         onMove={(id, x, y) => { compactRequest = null; positions = { ...positions, [id]: { x, y } }; }} />

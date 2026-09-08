@@ -1,5 +1,5 @@
 import { calculateRenderLayout } from './graph-layout-runner';
-export function requestLayout<T>(kind: 'map' | 'map-compact' | 'steps' | 'screens' | 'flow' | 'scene-routes', payload: unknown, options: unknown, done: (result: T) => void, fail: (error: string) => void): () => void {
+export function requestLayout<T>(kind: 'map' | 'map-compact' | 'steps' | 'screens' | 'flow' | 'scene-routes' | 'relationships', payload: unknown, options: unknown, done: (result: T) => void, fail: (error: string) => void): () => void {
   if (typeof Worker === 'undefined') {
     // 嵌入式宿主与测试环境没有 Worker，输入仍由调用方先做预算检查。
     let active = true;
