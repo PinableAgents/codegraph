@@ -14,6 +14,7 @@
   or a Flow strip between two steps.
 -->
 <script lang="ts">
+  import { selectDropdown } from '../lib/dropdown';
   import { graphStatus } from '../lib/graph-status.svelte';
   import SymbolPicker from '../components/graph/SymbolPicker.svelte';
   import { readGraphHistory, saveGraphHistory } from '../lib/graph-history';
@@ -476,8 +477,8 @@
   <SymbolPicker label={graphText('更换起点', 'Change anchor')} bind:value={anchorChoice} />
   <button disabled={!anchorChoice} onclick={() => navigate(stepsHref({ anchor: anchorChoice, depth: depth ?? undefined, through, view: readAs }))}>{graphText('应用起点', 'Use anchor')}</button>
   <span>{graphText('固定起点：', 'Fixed anchor: ')}{payload?.anchor.name ?? symbol ?? anchor ?? graphText('请选择起点', 'Choose an anchor')}</span>
-  <label>{graphText('深度', 'Depth')} <select value={depth ?? payload?.depth ?? 6} onchange={e => navigate(rewrite({ depth: Number(e.currentTarget.value) }))}>{#each DEPTHS as d}<option value={d}>{d}</option>{/each}</select></label>
-  <label>{graphText('阅读', 'Reading')} <select value={readAs} onchange={e => navigate(rewrite({ view: e.currentTarget.value as 'order' | 'tree' }))}><option value="order">{graphText('代码顺序', 'Code order')}</option><option value="tree">{graphText('影响树', 'Impact tree')}</option></select></label>
+  <label>{graphText('深度', 'Depth')} <select use:selectDropdown value={depth ?? payload?.depth ?? 6} onchange={e => navigate(rewrite({ depth: Number(e.currentTarget.value) }))}>{#each DEPTHS as d}<option value={d}>{d}</option>{/each}</select></label>
+  <label>{graphText('阅读', 'Reading')} <select use:selectDropdown value={readAs} onchange={e => navigate(rewrite({ view: e.currentTarget.value as 'order' | 'tree' }))}><option value="order">{graphText('代码顺序', 'Code order')}</option><option value="tree">{graphText('影响树', 'Impact tree')}</option></select></label>
   <label><input type="checkbox" checked={through} onchange={e => navigate(rewrite({ through: e.currentTarget.checked }))} />{graphText('穿过页面边界', 'Continue through screens')}</label>
   <button disabled={!selected} onclick={() => selected && startHere(selected)}>{graphText('以选中节点为起点', 'Start from selection')}</button>
 </div>

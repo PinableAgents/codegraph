@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { selectDropdown } from './lib/dropdown';
   import { untrack, onDestroy } from 'svelte';
   import WorkspaceOverview from './components/WorkspaceOverview.svelte';
   import { graphStatus } from './lib/graph-status.svelte';
@@ -186,7 +187,7 @@
   <aside aria-label={i18n.t('wb.nav')}>
     <button class="collapse" onclick={() => collapsed = !collapsed} aria-label={i18n.t('wb.collapse')} aria-expanded={!collapsed}>☰ <span>{i18n.t('wb.nav')}</span></button>
     <a class="nav-item" href="#/workspace" title={i18n.t('wb.workspace')}><b>◫</b><span>{i18n.t('wb.workspace')}</span></a>
-    <div class="project-select"><select aria-label={i18n.t('wb.switch')} value={selectedId ?? ''} onchange={(event) => navigate(workspace.href(event.currentTarget.value))}><option value="" disabled>{i18n.t('wb.choose')}</option>{#each workspace.projects as item}<option value={item.id} disabled={!item.available}>{item.name}{item.available ? '' : i18n.t('wb.unavailableSuffix')}</option>{/each}</select></div>
+    <div class="project-select"><select use:selectDropdown aria-label={i18n.t('wb.switch')} value={selectedId ?? ''} onchange={(event) => navigate(workspace.href(event.currentTarget.value))}><option value="" disabled>{i18n.t('wb.choose')}</option>{#each workspace.projects as item}<option value={item.id} disabled={!item.available}>{item.name}{item.available ? '' : i18n.t('wb.unavailableSuffix')}</option>{/each}</select></div>
     {#if selectedId}
       <a class="nav-item" class:active={route.view === 'home'} href={projectHome} title={i18n.t('wb.overview')}><b>⌂</b><span>{i18n.t('wb.overview')}</span></a>
       <a class="nav-item" class:active={route.view === 'map'} href={workspace.href(selectedId, 'map')} title={i18n.t('wb.map')}><b>◇</b><span>{i18n.t('wb.map')}</span></a>

@@ -17,6 +17,7 @@
   the pointer means the line NEAREST it, not the one drawn last under it.
 -->
 <script lang="ts">
+  import { selectDropdown } from '../lib/dropdown';
   import { graphStatus } from '../lib/graph-status.svelte';
   import DirectoryBrowser from '../components/graph/DirectoryBrowser.svelte';
   import { getGraphAdapter } from '../lib/adapter';
@@ -281,7 +282,7 @@
 <div class="graph-shell">
 {#if selectionNotice}<div role="status">{selectionNotice}</div>{/if}
 <div class="scopebar" role="toolbar" aria-label={graphText('页面图范围', 'Screens scope')}>
-  <label>{graphText('范围', 'Scope')} <select bind:value={scope}><option value="">{graphText('所有页面', 'All screens')}</option>{#each payload?.screens ?? [] as screen (screen.id)}<option value={screen.id}>{screen.path}</option>{/each}</select></label>
+  <label>{graphText('范围', 'Scope')} <select use:selectDropdown bind:value={scope}><option value="">{graphText('所有页面', 'All screens')}</option>{#each payload?.screens ?? [] as screen (screen.id)}<option value={screen.id}>{screen.path}</option>{/each}</select></label>
   <button disabled={!selected} onclick={() => scope = selected ?? ''}>{graphText('聚焦选中一跳', 'Focus one hop')}</button>
   <button disabled={!scope} onclick={() => scope = ''}>{graphText('重置范围', 'Reset scope')}</button>
   <button disabled={!selected} onclick={() => selected && navigate(stepsHref({ anchor: selected }))}>{graphText('查看此处步骤', 'Read steps from here')}</button>

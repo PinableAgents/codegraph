@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { selectDropdown } from '../lib/dropdown';
   import { i18n } from '../lib/i18n.svelte';
   import { workspace, type WorkspaceResult } from '../lib/workspace.svelte';
   import { createProjectNavigation } from '../lib/navigation';
@@ -51,7 +52,7 @@
   <input bind:this={input} bind:value={query} onkeydown={searchKeys} onfocus={() => open = true} aria-label={i18n.t('wb.search')} placeholder={i18n.t('wb.searchPlaceholder')} />
   {#if open}
     <section bind:this={panel} class="results" use:restoreScroll onscroll={(event) => { scroll = event.currentTarget.scrollTop; }} aria-label={i18n.t('wb.results')}>
-      <div class="filters"><select bind:value={scope} aria-label={i18n.t('wb.scope')}><option value="">{i18n.t('wb.all')}</option>{#each workspace.projects as item}<option value={item.id}>{item.name}</option>{/each}</select><button onclick={() => open = false}>{i18n.t('wb.close')}</button></div>
+      <div class="filters"><select use:selectDropdown bind:value={scope} aria-label={i18n.t('wb.scope')}><option value="">{i18n.t('wb.all')}</option>{#each workspace.projects as item}<option value={item.id}>{item.name}</option>{/each}</select><button onclick={() => open = false}>{i18n.t('wb.close')}</button></div>
       <p class="hint">{i18n.t('wb.filters')}</p>
       {#if loading}<p>{i18n.t('wb.searching')}</p>{:else if error}<p role="alert">{error}</p>{:else if query && !results.length}<p>{i18n.t('wb.noResults')}</p>{:else if !query}<p>{i18n.t('wb.searchHint')}</p>{/if}
       {#each results as result (`${result.projectId}:${result.node.id}`)}

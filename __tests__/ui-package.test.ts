@@ -20,8 +20,32 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { flushSync, mount, unmount } from 'svelte';
+import { dismissDropdown, selectDropdown } from '../ui/src/lib/dropdown';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 const g6Harness = vi.hoisted(() => ({ scene: null as any, events: null as any, destroyed: 0, focused: [] as string[] }));
+it('dropdowns dismiss on pointer leave, outside click and Escape while preserving selection', () => {
+  const host = document.createElement('div'); document.body.append(host);
+  const select = document.createElement('select'); select.innerHTML = '<option value="a">Alpha</option><option value="b">Beta</option>';
+  host.append(select); const changed = vi.fn(); select.addEventListener('change', changed);
+  const action = selectDropdown(select);
+  try {
+    const wrapper = host.querySelector<HTMLElement>('.cg-select')!;
+    const trigger = wrapper.querySelector<HTMLButtonElement>('button')!;
+    const menu = wrapper.querySelector<HTMLElement>('[role=listbox]')!;
+    trigger.click(); expect(menu.hidden).toBe(false);
+    menu.querySelectorAll<HTMLButtonElement>('button')[1]!.click();
+    expect(select.value).toBe('b'); expect(changed).toHaveBeenCalledOnce(); expect(menu.hidden).toBe(true);
+    trigger.click(); wrapper.dispatchEvent(new Event('pointerleave')); expect(menu.hidden).toBe(true);
+    trigger.click(); document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })); expect(menu.hidden).toBe(true);
+    trigger.click(); wrapper.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(menu.contains(document.activeElement)).toBe(true);
+    wrapper.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(menu.hidden).toBe(true); expect(document.activeElement).toBe(trigger);
+    const details = document.createElement('details'); details.innerHTML = '<summary>Recent</summary><button>Node</button>'; host.append(details);
+    const dismiss = dismissDropdown(details); details.open = true;
+    details.dispatchEvent(new Event('pointerleave')); expect(details.open).toBe(false); dismiss.destroy();
+  } finally { action.destroy(); host.remove(); }
+});
 // jsdom tests exercise the Svelte/adapter boundary; real Canvas rendering is checked in the browser.
 vi.mock('../ui/src/lib/g6-runtime', async () => {
   const { mount, unmount } = await import('svelte');

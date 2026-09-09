@@ -1,5 +1,6 @@
 <!-- 架构图采用 Worker 自动布局，允许在当前范围手动排列并展示静态依赖流向。 -->
 <script lang="ts">
+  import { selectDropdown } from '../lib/dropdown';
   import type { MapEdgeStyle } from '../lib/map-edge-path';
   import type { CompactMapInput } from '../lib/map-compact';
   import { graphStatus } from '../lib/graph-status.svelte';
@@ -262,14 +263,14 @@
 <div class="graph-shell">
 {#if selectionNotice}<div role="status">{selectionNotice}</div>{/if}
 <div class="scopebar" role="toolbar" aria-label={graphText('架构图范围', 'Architecture scope')}>
-  <label>{graphText('目录', 'Root')} <select value={root ?? ''} onchange={e => setRoot(e.currentTarget.value)}><option value="">{graphText('整个项目', 'Whole project')}</option>{#each payload?.roots ?? [] as option (option.root)}<option value={option.root}>{option.label}</option>{/each}</select></label>
-  <label>{graphText('深度', 'Depth')} <select value={depth} onchange={e => navigate(mapHref({ root, depth: Number(e.currentTarget.value), tests }))}>{#each [1,2,3,4] as d}<option value={d}>{d}</option>{/each}</select></label>
+  <label>{graphText('目录', 'Root')} <select use:selectDropdown value={root ?? ''} onchange={e => setRoot(e.currentTarget.value)}><option value="">{graphText('整个项目', 'Whole project')}</option>{#each payload?.roots ?? [] as option (option.root)}<option value={option.root}>{option.label}</option>{/each}</select></label>
+  <label>{graphText('深度', 'Depth')} <select use:selectDropdown value={depth} onchange={e => navigate(mapHref({ root, depth: Number(e.currentTarget.value), tests }))}>{#each [1,2,3,4] as d}<option value={d}>{d}</option>{/each}</select></label>
   <label><input type="checkbox" checked={tests} onchange={e => setTests(e.currentTarget.checked)} />{graphText('包含测试', 'Include tests')}</label>
   <label>{graphText('最小权重', 'Min weight')} <input type="number" min="1" max="10000" bind:value={minWeight} /></label>
   {#if selectedTarget?.kind === 'file'}<a href={fileHref(selectedTarget.path)}>{graphText('打开门面文件', 'Open facade file')}</a>{:else}<button disabled={selectedTarget?.kind !== 'directory'} onclick={() => selectedTarget?.kind === 'directory' && setRoot(selectedTarget.path)}>{graphText('下钻选中目录', 'Drill into selection')}</button>{/if}
-  <label>{graphText('一跳方向', 'One-hop direction')} <select bind:value={focusDirection}><option value="both">{graphText('双向', 'Both')}</option><option value="in">{graphText('上游', 'Incoming')}</option><option value="out">{graphText('下游', 'Outgoing')}</option></select></label>
+  <label>{graphText('一跳方向', 'One-hop direction')} <select use:selectDropdown bind:value={focusDirection}><option value="both">{graphText('双向', 'Both')}</option><option value="in">{graphText('上游', 'Incoming')}</option><option value="out">{graphText('下游', 'Outgoing')}</option></select></label>
   <label><input type="checkbox" bind:checked={focusOnly} />{graphText('只看聚焦', 'Focus only')}</label>
-  <label>{graphText('连线', 'Edges')} <select aria-label={graphText('连线样式', 'Edge style')} bind:value={edgeStyle}><option value="curve">{graphText('圆角折线', 'Rounded polyline')}</option><option value="straight">{graphText('直线', 'Straight')}</option></select></label>
+  <label>{graphText('连线', 'Edges')} <select use:selectDropdown aria-label={graphText('连线样式', 'Edge style')} bind:value={edgeStyle}><option value="curve">{graphText('曲线', 'Curve')}</option><option value="straight">{graphText('直线', 'Straight')}</option></select></label>
   <button disabled={!focusOnly || !selected || !layout || !!compactRequest} title={graphText('选中节点并开启只看聚焦后，重新排列当前可见节点，缩短长距离连线。', 'Select a node and enable Focus only to arrange visible nodes closer together.')} onclick={compactVisible}>{compactRequest ? graphText('排列中…', 'Arranging…') : graphText('紧凑排列', 'Compact layout')}</button>
   <button disabled={!layout} aria-pressed={flowPlaying} onclick={() => flowPlaying = !flowPlaying}>{flowPlaying ? graphText('暂停流向', 'Pause flow') : graphText('播放流向', 'Play flow')}</button>
   <button disabled={!manuallyPlaced && relationshipLayout === 'default'} onclick={() => { compactRequest = null; positions = {}; relationshipLayout = 'default'; fitRequest = {}; }}>{graphText('恢复自动布局', 'Reset layout')}</button>

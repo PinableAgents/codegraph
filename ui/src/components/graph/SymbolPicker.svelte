@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { dismissDropdown } from '../../lib/dropdown';
   import { graphText } from '../../lib/graph-copy';
   import { fetchSearch } from '../../lib/api';
   import type { WireSearchResult } from '../../lib/wire';
@@ -16,7 +17,7 @@
     return () => { clearTimeout(timer); controller.abort(); };
   });
 </script>
-<div class="picker">
+<div class="picker" use:dismissDropdown={() => query = ''}>
   <label>{label}<input aria-label={label} placeholder={value || graphText('搜索符号并选择…', 'Search and select a symbol…')} bind:value={query} /></label>
   {#if value}<span class="chosen" title={value}>{value}</span>{/if}
   {#if query}<div class="results">{#each results as item (item.id)}<button onclick={() => { value = item.id; query = ''; }}>{item.name}<small>{item.file}:{item.line}</small></button>{/each}{#if error}<span role="alert">{error}</span>{/if}</div>{/if}

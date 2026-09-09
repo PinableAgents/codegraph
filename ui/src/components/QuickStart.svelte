@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { selectDropdown } from '../lib/dropdown';
   import { i18n } from '../lib/i18n.svelte';
   import { guide } from '../lib/guide.svelte';
   import { palette } from '../lib/palette.svelte';
@@ -21,7 +22,7 @@
     <div class="heading"><h2>{i18n.t('help.quickStart')}</h2><button onclick={() => guide.setDismissed(true)}>{i18n.t('help.dismiss')}</button></div>
     <p>{i18n.t('help.quickIntro')}</p>
     {#if example}
-      <label>{i18n.t('help.example')} <select value={example.id} onchange={event => selected = event.currentTarget.value}>{#each candidates as item}<option value={item.id}>{item.name} — {item.file}</option>{/each}</select></label>
+      <label>{i18n.t('help.example')} <select use:selectDropdown value={example.id} onchange={event => selected = event.currentTarget.value}>{#each candidates as item}<option value={item.id}>{item.name} — {item.file}</option>{/each}</select></label>
     {:else}
       <p role="status">{i18n.t(palette.entriesSettled ? 'help.noExample' : 'help.loadingExample')}</p>
     {/if}

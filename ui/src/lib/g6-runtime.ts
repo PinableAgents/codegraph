@@ -1,11 +1,10 @@
-import { Graph, BaseEdge, Polyline, ExtensionCategory, register, type GraphData, type NodeData, type EdgeData } from '@antv/g6';
+import { Graph, BaseEdge, Cubic, ExtensionCategory, register, type GraphData, type NodeData, type EdgeData } from '@antv/g6';
 import { mount, unmount } from 'svelte';
 import type { GraphController, GraphScene, GraphSnapshot, SceneNode, Viewport } from './graph-scene';
 import { snapshotSvg } from './graph-snapshot';
-import { requestLayout } from './graph-layout';
 
 /** Extensions capture the actual routed path for export, rather than redrawing old model curves. */
-class RoutedEdge extends Polyline {
+class RoutedEdge extends Cubic {
   private routeKey = '';
   private routePath: any;
   protected getKeyPath(attributes: any): any {
@@ -57,6 +56,7 @@ export class G6Runtime implements GraphController {
   private colors: Record<string, string> = {};
   private collapsed = new Set<string>();
   private hovered: string | null = null;
+  private hoveredNode: string | null = null;
   private highlighted = new Set<string>();
   private states = new Map<string, string>();
   private edgeLabels = new Map<string,string>();
@@ -92,6 +92,12 @@ export class G6Runtime implements GraphController {
     });
     this.graph.on('node:click', (event: any) => this.select(String(event.target.id)));
     this.graph.on('canvas:click', () => this.select(null));
+    this.graph.on('node:pointerenter', (event: any) => {
+      const id = String(event.target.id);
+      if (this.scene.nodes.find(n => n.id === id)?.decorative) return;
+      this.hoveredNode = id; this.enqueueStates();
+    });
+    this.graph.on('node:pointerleave', () => { this.hoveredNode = null; this.enqueueStates(); });
     this.graph.on('edge:pointermove', (event: any) => {
       const id = String(event.target.id), edge = this.scene.edges.find(e => e.id === id);
       if (this.hovered !== id) { this.hovered = id; this.enqueueStates(); }
@@ -112,7 +118,7 @@ export class G6Runtime implements GraphController {
     const css = getComputedStyle(this.container);
     const value = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
     this.colors = { paper: value('--paper', '#fff'), ink: value('--ink', '#172b3b'), sub: value('--ink-2', '#526475'),
-      line: value('--rule-soft', '#91a4b4'), edge: value('--route-branch', '#466783'), accent: value('--route-main', '#ad6500'), group: value('--paper-2', '#f4f7fa') };
+      line: value('--node-border', '#71849a'), edge: value('--route-branch', '#466783'), accent: value('--route-main', '#ad6500'), group: value('--paper-2', '#f4f7fa') };
   }
   private enqueue(work: () => Promise<void>): Promise<void> {
     this.tail = this.tail.then(async () => { if (!this.closed) await work(); }).catch(error => { if (!this.closed) { console.error('G6 render failed', error); this.events.error(String(error)); } });
@@ -130,24 +136,7 @@ export class G6Runtime implements GraphController {
         const started = performance.now(); this.paths.clear(); this.labelPoints.clear(); this.states.clear(); this.edgeLabels.clear();
         const ids = new Set(scene.nodes.map(n => n.id));
         for (const [id, entry] of this.mounts) if (!ids.has(id)) { void unmount(entry.instance); this.mounts.delete(id); }
-        let routes: Record<string, [number, number][]> = {};
-        if (scene.edges.filter(e => !e.path && !e.straight).length > 100) {
-          const folded = new Set(scene.groups.filter(g=>collapsed.has(g.id)).flatMap(g=>g.members));
-          const routeNodes = scene.nodes.filter(n=>!folded.has(n.id)).map(n=>({id:n.id,x:n.x,y:n.y,width:n.width,height:n.height}));
-          for (const group of scene.groups.filter(g=>collapsed.has(g.id))) {
-            const members=scene.nodes.filter(n=>group.members.includes(n.id));
-            const x=(Math.min(...members.map(n=>n.x))+Math.max(...members.map(n=>n.x+n.width)))/2;
-            const y=(Math.min(...members.map(n=>n.y))+Math.max(...members.map(n=>n.y+n.height)))/2;
-            routeNodes.push({id:group.id,x:x-100,y:y-24,width:200,height:48});
-          }
-          routes = await new Promise((resolve,reject)=> {
-            const cancel=requestLayout<Record<string,[number,number][]>>('scene-routes',{nodes:routeNodes,edges:scene.edges.filter(e=>!e.path&&!e.straight).map(e=>({id:e.id,source:e.source,target:e.target}))},{},resolve,reject);
-            this.cancelRoutes=()=>{cancel();resolve({});};
-          });
-          this.cancelRoutes=undefined;
-          if(this.closed || generation!==this.generation) return;
-        }
-        const data = this.data(scene, routes);
+        const data = this.data(scene);
         this.graph.setData(data);
         await this.graph.render();
         if (this.closed) return;
@@ -198,12 +187,12 @@ export class G6Runtime implements GraphController {
       }
     }
   }
-  private data(scene: GraphScene, routes: Record<string,[number,number][]> = {}): GraphData {
+  private data(scene: GraphScene): GraphData {
     const nodes: NodeData[] = scene.nodes.map(n => ({ id: n.id, combo: n.group, data: { kind: n.kind, html: !!n.component }, style: {
       x: n.x + n.width / 2, y: n.y + n.height / 2, size: [n.width, n.height], radius: 4,
       fill: ['region', 'decision'].includes(n.kind) ? 'transparent' : this.colors.paper,
       stroke: ['region', 'decision'].includes(n.kind) ? 'transparent' : this.colors.line,
-      lineWidth: 1, lineDash: n.dashed ? [5, 3] : [],
+      lineWidth: 1.8, lineDash: n.dashed ? [5, 3] : [],
       labelText: `${n.entry ? '● ' : ''}${n.cyclic?'↻ ':''}${n.label}${n.sub ? `\n${n.sub}` : ''}`, labelPlacement: 'center',
       labelFontFamily: 'monospace', labelFontSize: n.kind === 'fork' ? 10 : 12, labelLineHeight: 16,
       labelFill: this.colors.ink, labelWordWrap: false,
@@ -215,9 +204,9 @@ export class G6Runtime implements GraphController {
       labelBackground: true, labelBackgroundFill: this.colors.paper, labelAutoRotate:false,
       lineDash: e.dashPattern ?? (e.dashed ? [5, 3] : []), endArrow: e.arrow !== false, startArrow: !!e.reverseCount,
       endArrowSize: 7, startArrowSize: 7, radius: 6,
-      router: routes[e.id] ? false : { type: 'shortest-path', enableObstacleAvoidance: true, offset: 12, gridSize: 24, maximumLoops: 600 },
+      curvePosition: [0.3, 0.7], curveOffset: [32, 32],
       routeEpoch: this.generation, straight: e.straight,
-      controlPoints: routes[e.id] ?? e.points ?? [], scenePath: e.path ? parseScenePath(e.path) : [],
+      controlPoints: [], scenePath: e.path ? parseScenePath(e.path) : [],
       capturePath: (path: any[]) => this.paths.set(e.id, path.map(command => command.join(' ')).join(' ')),
       captureLabel: (style:any) => {const t=style.transform?.find((p:any[])=>p[0]==='translate');this.labelPoints.set(e.id,{x:t?.[1]??style.x??0,y:t?.[2]??style.y??0});},
     } }));
@@ -230,15 +219,30 @@ export class G6Runtime implements GraphController {
   private async applyStates() {
     const changes: Record<string, string[]> = {};
     const labels:Partial<EdgeData>[]=[];
+    const relatedNodes = new Set<string>();
+    const relatedEdges = new Set<string>();
+    if (this.hoveredNode) relatedNodes.add(this.hoveredNode);
+    for (const edge of this.scene.edges) {
+      if (edge.id === this.hovered || (this.hoveredNode && (edge.source === this.hoveredNode || edge.target === this.hoveredNode))) {
+        relatedEdges.add(edge.id); relatedNodes.add(edge.source); relatedNodes.add(edge.target);
+      }
+    }
+    const hovering = relatedNodes.size > 0;
     for (const n of this.scene.nodes) {
-      const next = n.selected ? ['selected'] : this.highlighted.has(n.id) ? ['active'] : n.dimmed ? ['dimmed'] : [];
+      const next = n.selected ? ['selected'] : this.highlighted.has(n.id) || relatedNodes.has(n.id) ? ['active'] : n.dimmed || (hovering && !n.decorative) ? ['dimmed'] : [];
       if (this.states.get(n.id) !== next.join()) { this.states.set(n.id, next.join()); changes[n.id] = next; }
+      const html = this.mounts.get(n.id)?.element;
+      if (html) {
+        html.style.opacity = next.includes('dimmed') ? '.25' : '1';
+        html.style.outline = next.includes('selected') || next.includes('active') ? `2.5px solid ${this.colors.accent}` : '';
+        html.style.boxShadow = n.id === this.hoveredNode ? `0 0 0 5px ${this.colors.accent}33` : '';
+      }
     }
     for (const e of this.scene.edges) {
       const labelKey=JSON.stringify([e.label,e.alwaysLabel,e.dashed,e.dashPattern]);
       if(this.edgeLabels.get(e.id)!==labelKey){this.edgeLabels.set(e.id,labelKey);labels.push({id:e.id,style:{labelText:e.label,label:!!e.alwaysLabel,lineDash:e.dashPattern??(e.dashed?[5,3]:[])}});}
-      const active = e.hot || this.hovered === e.id || e.originalIds.some(id => this.highlighted.has(id));
-      const next = active ? ['active'] : e.dimmed ? ['dimmed'] : [];
+      const active = e.hot || relatedEdges.has(e.id) || e.originalIds.some(id => this.highlighted.has(id));
+      const next = active ? ['active'] : e.dimmed || hovering ? ['dimmed'] : [];
       if (this.states.get(e.id) !== next.join()) { this.states.set(e.id, next.join()); changes[e.id] = next; }
     }
     if(labels.length){this.graph.updateEdgeData(labels);await this.graph.draw();}

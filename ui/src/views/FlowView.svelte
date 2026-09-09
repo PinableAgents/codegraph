@@ -14,6 +14,7 @@
   path so far, so the strip hands the reader off to the view that goes deep.
 -->
 <script lang="ts">
+  import { selectDropdown } from '../lib/dropdown';
   import { graphStatus } from '../lib/graph-status.svelte';
   import { readGraphHistory, saveGraphHistory } from '../lib/graph-history';
   import BudgetNotice from '../components/graph/BudgetNotice.svelte';
@@ -288,7 +289,7 @@
     <SymbolPicker label={graphText('终点', 'To')} bind:value={toChoice} />
     <button disabled={!fromChoice || !toChoice} onclick={() => navigate(flowHref({ from: fromChoice, to: toChoice }))}>{graphText('查找路径', 'Find paths')}</button>
     {#if flows.length > 0}
-      <select
+      <select use:selectDropdown
         aria-label="Which path to draw"
         value={showAll ? ALL : (picked ?? '')}
         onchange={(event) => {

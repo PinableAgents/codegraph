@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { selectDropdown } from '../lib/dropdown';
   import { fetchNeighbors, type WireNeighborPage } from '../lib/api';
   import { getGraphAdapter } from '../lib/adapter';
   import { fileHref, symbolHref } from '../lib/navigation';
@@ -42,7 +43,7 @@
   <section class="relationships">
     <button data-open aria-expanded={open} onclick={() => open = !open}>{i18n.t('wb.allRelations')} {open ? '▴' : '▾'}</button>
     {#if open}
-      <div class="controls"><label>{i18n.t('wb.direction')} <select value={direction} onchange={changeDirection}><option value="in">{i18n.t('wb.incoming')}</option><option value="out">{i18n.t('wb.outgoing')}</option></select></label><span>{i18n.t('wb.relationPage', { page: pageNumber })}</span></div>
+      <div class="controls"><label>{i18n.t('wb.direction')} <select use:selectDropdown value={direction} onchange={changeDirection}><option value="in">{i18n.t('wb.incoming')}</option><option value="out">{i18n.t('wb.outgoing')}</option></select></label><span>{i18n.t('wb.relationPage', { page: pageNumber })}</span></div>
       {#if loading}<p role="status">{i18n.t('wb.searching')}</p>
       {:else if failure}<p role="alert">{failure}</p><button data-retry onclick={reset}>{i18n.t('wb.reloadRelations')}</button>
       {:else if page}

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { selectDropdown } from '../lib/dropdown';
   import WorkspaceSearch from './WorkspaceSearch.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { i18n } from '../lib/i18n.svelte';
@@ -17,8 +18,8 @@
   <button class="settings" onclick={() => settings = !settings} aria-expanded={settings}>{i18n.t('wb.settings')}</button>
   {#if settings}<section class="panel" aria-label={i18n.t('wb.settings')}>
     <strong>{project ?? i18n.t('wb.workspaceSettings')}</strong><p>{stats ?? ''}</p>
-    <label>{i18n.t('wb.theme')} <select value={themePreference.current} onchange={changeTheme}><option value="auto">{i18n.t('wb.auto')}</option><option value="light">{i18n.t('wb.light')}</option><option value="dark">{i18n.t('wb.dark')}</option></select></label>
-    <label>{i18n.t('wb.language')} <select value={i18n.locale} onchange={changeLanguage}><option value="zh-CN">{i18n.t('language.chinese')}</option><option value="en">{i18n.t('language.english')}</option></select></label>
+    <label>{i18n.t('wb.theme')} <select use:selectDropdown value={themePreference.current} onchange={changeTheme}><option value="auto">{i18n.t('wb.auto')}</option><option value="light">{i18n.t('wb.light')}</option><option value="dark">{i18n.t('wb.dark')}</option></select></label>
+    <label>{i18n.t('wb.language')} <select use:selectDropdown value={i18n.locale} onchange={changeLanguage}><option value="zh-CN">{i18n.t('language.chinese')}</option><option value="en">{i18n.t('language.english')}</option></select></label>
     <p>{i18n.t('wb.shortcuts')}</p>
     <button onclick={() => settings = false}>{i18n.t('wb.closeSettings')}</button>
   </section>{/if}
