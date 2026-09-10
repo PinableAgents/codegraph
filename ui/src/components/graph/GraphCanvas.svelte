@@ -229,6 +229,8 @@
   .surface{touch-action:none}
   .surface :global([data-graph-cycle=true])::after{content:'↻';position:absolute;right:4px;top:-15px;font:14px monospace;color:var(--ink-2);background:var(--paper)}
   .toolbar{position:absolute;z-index:10;top:12px;left:12px;right:12px;display:flex;flex-wrap:wrap;gap:5px;pointer-events:none}.toolbar>*{pointer-events:auto}
+  /* The dropdown action creates this wrapper outside Svelte's scoped markup. */
+  .toolbar>:global(.cg-select){pointer-events:auto}
   .recent{font:12px var(--sans);color:var(--ink-2)}
   .recent-items button{text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.recent-empty{color:var(--ink-3)}
   input,button,select,summary{font:12px var(--sans);color:var(--ink);background:var(--paper-2);border:1px solid var(--rule-soft);border-radius:4px;padding:7px;box-sizing:border-box;min-height:32px}

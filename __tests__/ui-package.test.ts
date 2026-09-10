@@ -1328,12 +1328,31 @@ it('关系布局切换保留真实边，选择不重排，手动位置按布局�
     nodes:['a','b','c','d'].map((id,i)=>({id,label:id,sub:'',kind:'module',x:i*240,y:0,width:180,height:48,draggable:true})),
     relations:[{id:'ab',source:'a',target:'b'}],edges:[{id:'ab',source:'a',target:'b',label:'1',width:1,originalIds:['ab'],path:'M180,24 L240,24',straight:true}]};
   const originalPositions=scene.nodes.map(n=>[n.x,n.y]);
+  // Vitest omits component styles; load the compiled CSS to exercise pointer hit testing rules.
+  const { compile } = await import('svelte/compiler');
+  const canvasCss = compile(readFileSync(join(process.cwd(), 'ui/src/components/graph/GraphCanvas.svelte'), 'utf8'), { css: 'external' }).css!.code;
+  const stylesheet = document.createElement('style');
+  // Match the mounted component's scope (Vite supplies its own filename to the compiler).
+  const compiledScope = canvasCss.match(/svelte-[\w-]+/)![0];
   const selectMode=(mode:string)=>{const select=host.querySelector<HTMLSelectElement>('select[aria-label="图布局"]')!;select.value=mode;select.dispatchEvent(new Event('change',{bubbles:true}));flushSync();};
   const ready=()=>vi.waitFor(()=>expect(host.querySelector('[data-graph-engine]')?.getAttribute('aria-busy')).toBe('false'));
   saveGraphHistory(location.href,{relationshipLayout:'default',layoutPositions:{},collapsedGroups:[],selected:null,analysisFocus:false});
   try {
     await render(GraphCanvas,{scene});
-    selectMode('circular'); await ready();
+    const toolbar = host.querySelector<HTMLElement>('.toolbar')!;
+    const mountedScope = [...toolbar.classList].find(name => name.startsWith('svelte-'))!;
+    stylesheet.textContent = canvasCss.replaceAll(compiledScope, mountedScope);
+    document.head.append(stylesheet);
+    const layoutTrigger = host.querySelector<HTMLButtonElement>('button[aria-label="图布局"]')!;
+    expect(getComputedStyle(toolbar).pointerEvents).toBe('none');
+    expect(getComputedStyle(layoutTrigger.parentElement!).pointerEvents).toBe('auto');
+    layoutTrigger.click();
+    const layoutMenu = layoutTrigger.parentElement!.querySelector<HTMLElement>('[role="listbox"]')!;
+    expect(layoutMenu.hidden).toBe(false);
+    [...layoutMenu.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(option => option.textContent === '环形')!.click();
+    flushSync(); await ready();
+    expect(host.querySelector('[data-graph-engine]')?.getAttribute('data-layout')).toBe('circular');
+    expect(layoutMenu.hidden).toBe(true);
     expect(g6Harness.scene.nodes.map((n:any)=>[n.x,n.y])).not.toEqual(originalPositions);
     expect(g6Harness.scene.relations).toEqual(scene.relations);
     expect(g6Harness.scene.edges[0]).toMatchObject({path:undefined,straight:true,originalIds:['ab']});
@@ -1355,7 +1374,7 @@ it('关系布局切换保留真实边，选择不重排，手动位置按布局�
     [...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='恢复布局')!.click();flushSync();await ready();
     expect(g6Harness.scene.nodes.map((n:any)=>[n.x,n.y])).toEqual(originalPositions);
     expect(readGraphHistory(location.href).layoutPositions).toEqual({});
-  } finally { saveGraphHistory(location.href,{relationshipLayout:'default',layoutPositions:{},selected:null}); }
+  } finally { stylesheet.remove(); saveGraphHistory(location.href,{relationshipLayout:'default',layoutPositions:{},selected:null}); }
 });
 
 it('架构图最近查看最多十个，去重置顶，重开保留，点击展开并定位，跨范围隔离',async()=>{
