@@ -62,11 +62,7 @@
       {#if !order}
         <div class="lrow">
           <span class="k-label mono">→ name</span>
-          <span
-            >What a box leads to, or what reaches it (←), when the two are too far apart for a line to be followed — said
-            in words under the box rather than drawn across the picture. Select the box and every one of its real lines
-            draws</span
-          >
+          <span>{graphText('当两个方框距离太远、连线难以跟随时，在方框下方用文字说明它通向哪里，或谁到达它（←），而非横跨图形绘线。选中方框后会显示它的全部真实连线', 'What a box leads to, or what reaches it (←), when the two are too far apart for a line to be followed — said in words under the box rather than drawn across the picture. Select the box and every one of its real lines draws')}</span>
         </div>
       {/if}
       {#if project === 'api'}
