@@ -22,6 +22,16 @@ class RuntimeTests(unittest.TestCase):
     def test_config(self):
         self.assertEqual(r.settings()["targets"], list(r.TARGETS))
 
+    def test_node_watch_fix_cannot_be_downgraded(self):
+        config = r.settings()
+        config['nodeVersion'] = 'v24.16.0'
+        with patch.object(r, 'read_json', return_value=config):
+            with self.assertRaisesRegex(ValueError, 'short-path'): r.settings()
+
+    def test_build_node_version_matches_bundle_pin(self):
+        workflow = (r.ROOT / '.github/workflows/pinable-desktop-runtime.yml').read_text()
+        self.assertIn("node-version: '" + r.settings()['nodeVersion'][1:] + "'", workflow)
+
     def test_all_binary_headers(self):
         for target in r.TARGETS:
             with self.subTest(target=target):
@@ -86,9 +96,9 @@ class RuntimeTests(unittest.TestCase):
             with self.assertRaises(ValueError): r.expected_digest(text, 'node.zip')
 
     def test_target_names(self):
-        self.assertEqual(r.node_archive_name('win32-arm64', 'v24.16.0'), 'node-v24.16.0-win-arm64.zip')
+        self.assertEqual(r.node_archive_name('win32-arm64', 'v24.21.0'), 'node-v24.21.0-win-arm64.zip')
         self.assertEqual(r.launcher_name('linux-x64'), 'codegraph_linux_amd64')
-        with self.assertRaises(ValueError): r.node_archive_name('unknown', 'v24.16.0')
+        with self.assertRaises(ValueError): r.node_archive_name('unknown', 'v24.21.0')
 
     def records(self):
         source = {'repository': 'PinableAgents/codegraph', 'revision': 'a'*40, 'version': '1.6.0',

@@ -56,6 +56,8 @@ def settings() -> dict:
     require(config.get("schemaVersion") == 1, "unsupported runtime configuration")
     require(re.fullmatch(r"v24\.\d+\.\d+", config["nodeVersion"]) is not None,
             "nodeVersion must be an explicit supported Node 24 version")
+    require(tuple(map(int, config["nodeVersion"][1:].split("."))) >= (24, 21, 0),
+            "Node >=24.21.0 is required for the Windows short-path fs.watch fix")
     require(config["targets"] == list(TARGETS), "target matrix must contain all six targets in canonical order")
     require(config["releasePrefix"] == "pinable-runtime-v", "unexpected release namespace")
     return config
@@ -316,7 +318,7 @@ def verify_bundle(target: str) -> None:
         "schemaVersion": 1, "ok": True, "target": target, "source": meta["source"],
         "checks": ["binary-architecture", "bundled-node", "sqlite-fts5", "kernel-contract-and-extraction",
                    "index-and-sync", "native-launcher-version", "standalone-launcher", "mcp-initialize-and-tools-list",
-                   "unicode-and-spaces-path", "viewer-and-wasm-assets"]})
+                   "unicode-and-spaces-path", "native-file-watch-events", "viewer-and-wasm-assets"]})
 
 
 def aggregate(directory: Path) -> dict:

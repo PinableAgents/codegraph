@@ -14,13 +14,15 @@ GitHub Actions → **Pinable desktop runtimes** → **Run workflow**。
 
 - `publish=false`（默认）：六个平台全部通过后提供 `pinable-codegraph-all-platforms` artifact，保留 30 天。PR 和维护文件合入 main 时也自动构建测试产物。
 - `publish=true`：只允许在 main 发布，所有检查通过后创建 `pinable-runtime-v<package-version>-<source-sha前12位>` GitHub prerelease。该版本不设置为 latest，不改变上游 `v*` 发布，也不上传 npm。不自动跟随上游 main 发布。
-- 同一源码 SHA 对应的 tag/资产不覆盖；重复发布会失败而不是替换已锁定文件。上传中断可能留下 draft；维护者检查后清理未发布 draft 再重试。已发布资产不要删改，应提交新的源码版本再发布。
+- 同一源码 SHA 对应的 tag/资产不覆盖；重复发布会失败而不是替换已锁定文件。上传中断可能留下 draft；维护者核实未发布状态后清理遗留 draft 和对应 tag 再重试。已发布资产不要删改，应提交新的源码版本再发布。
 
 正常 Release 下载形式：
 
 ```text
 https://github.com/PinableAgents/codegraph/releases/download/<releaseTag>/<asset.file>
 ```
+
+Actions 下载的是外层 ZIP，先解开它；内部表格列出的 `codegraph-<target>.tar.gz` / `.zip` 才是 `CODEGRAPH_COMPONENT_ARCHIVE`，不要将 Actions 外层 ZIP 交给消费者。`pinable-codegraph-manifest` artifact 单独提供 JSON 清单与 SHA256SUMS，方便只下载校验信息。
 
 PR artifact 是候选资产，不代表已发布或已纳入 Desktop 的验证版本。消费者必须固定源码 revision 和校验和，不能用 latest 绕过现有锁文件。
 
@@ -61,7 +63,7 @@ macOS 产物按架构分开；它们不是 Universal 2 runtime。Desktop 的 Uni
 
 ## 验证、供应链与发布边界
 
-应用只构建一次，并使用 `npm ci --omit=dev --ignore-scripts` 安装锁定生产依赖。原生 kernel 从同一 Git revision 通过 `cargo build --release --locked` 在六个目标系统/架构构建。Node 固定在 `.pinable/runtime.json`（初始沿用上游 v24.16.0），下载官方发行文件并在解压前核对同一 HTTPS 官方源的 `SHASUMS256.txt`；不是 GPG 签名验证。清单记录官方包哈希与实际 Go/Rust 工具链版本，`packageLockSha256` 是 Git 中 lock blob 的 SHA256，避免 Windows CRLF 导致错误漂移。Rust stable、Go 1.26.x 和 runner 镜像可更新，因此不承诺跨不同工具链构建的字节完全一致。
+应用只构建一次，并使用 `npm ci --omit=dev --ignore-scripts` 安装锁定生产依赖。原生 kernel 从同一 Git revision 通过 `cargo build --release --locked` 在六个目标系统/架构构建。Node 固定在 `.pinable/runtime.json`（固定为 v24.21.0），下载官方发行文件并在解压前核对同一 HTTPS 官方源的 `SHASUMS256.txt`；不是 GPG 签名验证。清单记录官方包哈希与实际 Go/Rust 工具链版本，`packageLockSha256` 是 Git 中 lock blob 的 SHA256，避免 Windows CRLF 导致错误漂移。Rust stable、Go 1.26.x 和 runner 镜像可更新，因此不承诺跨不同工具链构建的字节完全一致。
 
 每个包实际解压到含空格/中文的路径，用包内 Node 校验版本、平台、SQLite/FTS5、kernel 合约和提取；再验证真实项目首次索引/增量同步、原生启动器成功与失败退出码，以及真实 stdio MCP initialize/tools-list。缺 kernel、架构错误、缺 viewer/WASM、任一平台失败或混合源码的资产均不能组成完整交付。
 
@@ -77,3 +79,9 @@ python -m unittest discover -s scripts/pinable/runtime -p 'test_*.py' -v
 ```
 
 打包与产物目录都在已有忽略规则覆盖的 `release/` 下；源码清理、升级和推送仍由维护者控制。
+
+### Windows 短路径监听回归
+
+首轮六平台验收在 Windows x64/ARM64 的 MCP 阶段发现 Node 24.16.0 所带 libuv 在 `RUNNER~1` 一类 8.3 路径下触发 `fs-event.c:72` 断言，进程直接终止。运行时固定升级为包含修复的 Node 24.21.0，不关闭监听、不删除中文/空格 fixture、不放宽退出码要求。生产者禁止回退到早于 24.21.0 的版本；smoke 同时检查真实目录文件事件。
+
+对应原始资料：libuv/libuv issue #5010；Node v24.21.0 的 `deps/uv/src/win/fs-event.c` 中 `uv__relative_path` 已将该不可恢复断言改为受控失败返回。此改动仅调整 Pinable runtime 的 Node 固定版本，不修改上游 `scripts/build-bundle.sh`。

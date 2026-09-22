@@ -24,6 +24,19 @@ async function main() {
     const db = new DatabaseSync(':memory:');
     db.exec('CREATE VIRTUAL TABLE smoke USING fts5(content)');
     db.close();
+    // Exercise the native watcher on the original (possibly 8.3) temp path.
+    // Do not canonicalize the fixture or disable watching to hide libuv aborts.
+    await new Promise((resolve, reject) => {
+      const marker = 'runtime-watch-probe.txt';
+      const timer = setTimeout(() => { watcher.close(); reject(new Error('native file-watch event missing')); }, 10000);
+      const watcher = fs.watch(project, {recursive: process.platform !== 'linux'}, (_event, filename) => {
+        if (filename && path.basename(String(filename)) === marker) {
+          clearTimeout(timer); watcher.close(); resolve();
+        }
+      });
+      watcher.on('error', error => { clearTimeout(timer); watcher.close(); reject(error); });
+      fs.writeFileSync(path.join(project, marker), 'must emit a filesystem event');
+    });
     const lib = path.join(bundle, 'lib');
     const { getKernel } = require(path.join(lib, 'dist/extraction/kernel/loader.js'));
     const kernel = getKernel();
