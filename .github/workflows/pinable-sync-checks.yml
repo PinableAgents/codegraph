@@ -1,6 +1,11 @@
 name: Pinable sync checks
 
 on:
+  workflow_call:
+    inputs:
+      source_ref:
+        type: string
+        default: ''
   pull_request:
     branches: [main]
   push:
@@ -23,6 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.source_ref || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v6
@@ -54,6 +60,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.source_ref || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@v6
         with:
