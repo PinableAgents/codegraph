@@ -1,0 +1,179 @@
+name: Validate PR 2060 remote conflict resolution
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths: ['.github/workflows/pinable-pr2060-validation.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pinable-pr2060-resolution
+  cancel-in-progress: false
+
+env:
+  CODEGRAPH_TELEMETRY: '0'
+  DO_NOT_TRACK: '1'
+  CARGO_BUILD_JOBS: '2'
+  FORK_SHA: '8e752b21e7a631346df1b539eb4b4dbfaf8e7f84'
+  UPSTREAM_SHA: 'e63fe2ec5b927d7c6f802b43649391c756979b31'
+  PROPOSAL_BRANCH: 'sync/pr2060-upstream-20260928'
+
+jobs:
+  validate:
+    if: github.repository == 'PinableAgents/codegraph' && github.event.pull_request.head.repo.full_name == 'PinableAgents/codegraph' && github.event.pull_request.head.ref == 'maintenance/pr2060-validation-20260928'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      # Deliberately check out the original PR source, not this helper branch.
+      # This one-time validation workflow must never enter the resolution tree.
+      - uses: actions/checkout@v6
+        with:
+          ref: '8e752b21e7a631346df1b539eb4b4dbfaf8e7f84'
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Prepare genuine two-parent merge, preferring upstream conflict hunks
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/pr2060-validation"
+          git remote add upstream https://github.com/colbymchenry/codegraph.git
+          git fetch --no-tags upstream refs/heads/main:refs/remotes/upstream/main
+          test "$(git rev-parse HEAD)" = "$FORK_SHA"
+          test "$(git rev-parse upstream/main)" = "$UPSTREAM_SHA"
+          test -z "$(git status --porcelain)"
+          node scripts/pinable/sync-upstream.mjs --check
+          git config --local user.name 'PinableAgents'
+          git config --local user.email '252275847+PinableAgents@users.noreply.github.com'
+          git switch -c "$PROPOSAL_BRANCH"
+          python - <<'PY'
+          import json, os, pathlib, subprocess
+          out = pathlib.Path(os.environ['RUNNER_TEMP']) / 'pr2060-validation'
+          upstream = os.environ['UPSTREAM_SHA']
+          fork = os.environ['FORK_SHA']
+          def git(*args, check=True):
+              return subprocess.run(['git', *args], check=check, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+          def text(*args):
+              return git(*args).stdout.decode().strip()
+          def conflicts():
+              return sorted(set(p.decode() for p in git('diff', '--name-only', '--diff-filter=U', '-z').stdout.split(b'\0') if p))
+          trial = git('merge', '--no-ff', '--no-commit', upstream, check=False)
+          (out / 'original-merge.log').write_bytes(trial.stdout + trial.stderr)
+          assert trial.returncode in (0, 1), trial.stderr
+          assert text('rev-parse', 'MERGE_HEAD') == upstream
+          original_conflicts = conflicts()
+          if original_conflicts:
+              # Abort only the disposable, clean-worktree trial merge above.
+              git('merge', '--abort')
+              merged = git('merge', '--no-ff', '--no-commit', '-X', 'theirs', upstream, check=False)
+              (out / 'remote-resolution.log').write_bytes(merged.stdout + merged.stderr)
+              assert merged.returncode in (0, 1), merged.stderr
+              assert text('rev-parse', 'MERGE_HEAD') == upstream
+          structural_conflicts = conflicts()
+          for path in structural_conflicts:
+              # Modify/delete and rename conflicts also follow the remote tree.
+              exists = git('cat-file', '-e', upstream + ':' + path, check=False).returncode == 0
+              if exists:
+                  git('restore', '--source=' + upstream, '--staged', '--worktree', '--', path)
+              else:
+                  git('rm', '-f', '--', path)
+          assert not conflicts()
+          subprocess.run(['node', 'scripts/pinable/sync-upstream.mjs', '--finish'], check=True)
+          git('diff', '--cached', '--check')
+          (out / 'resolution.patch').write_bytes(git('diff', '--cached', '--binary').stdout)
+          git('commit', '-m', 'merge: resolve upstream PR #2060 using remote conflict versions', '-m',
+              'Merge colbymchenry/codegraph main at ' + upstream + '. Conflicting hunks prefer upstream; non-conflicting fork changes remain. Preserve both parents and update the upstream manifest. No release or force push.')
+          commit = text('rev-parse', 'HEAD')
+          assert text('show', '-s', '--format=%P', 'HEAD').split() == [fork, upstream]
+          assert not text('status', '--porcelain')
+          assert git('cat-file', '-e', 'HEAD:.github/workflows/pinable-pr2060-validation.yml', check=False).returncode != 0
+          subprocess.run(['node', 'scripts/pinable/sync-upstream.mjs', '--check'], check=True)
+          report = {'pr': 'colbymchenry/codegraph#2060', 'forkBefore': fork, 'upstream': upstream,
+                    'commit': commit, 'tree': text('rev-parse', 'HEAD^{tree}'),
+                    'mergeBase': text('merge-base', fork, upstream),
+                    'upstreamCommits': int(text('rev-list', '--count', fork + '..' + upstream)),
+                    'conflictingFiles': original_conflicts, 'structuralConflicts': structural_conflicts,
+                    'policy': 'upstream conflict hunks; preserve non-conflicting fork edits',
+                    'validationWorkflowIncluded': False}
+          (out / 'resolution.json').write_text(json.dumps(report, indent=2) + '\n')
+          git('bundle', 'create', str(out / 'proposal.bundle'), 'HEAD')
+          print(json.dumps(report, indent=2))
+          PY
+      - name: Existing sync safety and runtime producer regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test scripts/pinable/sync-upstream.test.mjs 2>&1 | tee "$RUNNER_TEMP/pr2060-validation/sync-tests.log"
+          python -m unittest discover -s scripts/pinable/runtime -p 'test_*.py' -v 2>&1 | tee "$RUNNER_TEMP/pr2060-validation/producer-tests.log"
+          node --test scripts/pinable/runtime/test-watch-probe.cjs 2>&1 | tee "$RUNNER_TEMP/pr2060-validation/watcher-tests.log"
+          (cd scripts/pinable/runtime/launcher && go test ./...) 2>&1 | tee "$RUNNER_TEMP/pr2060-validation/launcher-tests.log"
+      - run: npm ci
+      - name: Build application and UI library
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build 2>&1 | tee "$RUNNER_TEMP/pr2060-validation/build.log"
+          npm run build:lib 2>&1 | tee "$RUNNER_TEMP/pr2060-validation/build-lib.log"
+      - name: Full engine and UI regression suite
+        shell: bash
+        run: npm test -- --maxWorkers=2 --minWorkers=1 2>&1 | tee "$RUNNER_TEMP/pr2060-validation/full-tests.log"
+      - name: Existing native kernel quality gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build:kernel 2>&1 | tee "$RUNNER_TEMP/pr2060-validation/kernel-build.log"
+          npm test -- __tests__/kernel-tsjs-parity.test.ts __tests__/rust-self-owner.test.ts __tests__/awaited-receiver.test.ts __tests__/release-main-regressions.test.ts --maxWorkers=2 --minWorkers=1 2>&1 | tee "$RUNNER_TEMP/pr2060-validation/native-tests.log"
+          test -z "$(git diff --name-only HEAD)"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr2060-resolution-validation
+          path: ${{ runner.temp }}/pr2060-validation/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  publish-proposal-branch:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: '8e752b21e7a631346df1b539eb4b4dbfaf8e7f84'
+          fetch-depth: 0
+      - uses: actions/download-artifact@v5
+        with:
+          name: pr2060-resolution-validation
+          path: ${{ runner.temp }}/pr2060-validation
+      - name: Push verified proposal only; never update main or upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          git bundle verify "$RUNNER_TEMP/pr2060-validation/proposal.bundle"
+          git fetch "$RUNNER_TEMP/pr2060-validation/proposal.bundle" "HEAD:refs/heads/$PROPOSAL_BRANCH"
+          expected=$(jq -er '.commit' "$RUNNER_TEMP/pr2060-validation/resolution.json")
+          test "$(git rev-parse "$PROPOSAL_BRANCH")" = "$expected"
+          test "$(git show -s --format=%P "$PROPOSAL_BRANCH")" = "$FORK_SHA $UPSTREAM_SHA"
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$FORK_SHA"
+          test "$(git ls-remote https://github.com/colbymchenry/codegraph.git refs/heads/main | cut -f1)" = "$UPSTREAM_SHA"
+          status=0
+          git ls-remote --exit-code origin "refs/heads/$PROPOSAL_BRANCH" > "$RUNNER_TEMP/existing-proposal.txt" || status=$?
+          test "$status" = 2
+          git push origin "refs/heads/$PROPOSAL_BRANCH:refs/heads/$PROPOSAL_BRANCH"
+          printf 'Validated proposal: `%s` on `%s`. Main and upstream are unchanged.\n' "$expected" "$PROPOSAL_BRANCH" >> "$GITHUB_STEP_SUMMARY"
