@@ -1,0 +1,41 @@
+name: PR 2060 focused regression checks
+
+on:
+  push:
+    branches: [sync/pr2060-20260928-e63fe2ec]
+    paths: [.github/workflows/pinable-pr2060-targeted.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  regressions:
+    if: github.repository == 'PinableAgents/codegraph'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CODEGRAPH_TELEMETRY: '0'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: d08dfc41c3c727322be0b03d08199ab975ae90a9
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Exercise real migration upgrades and both UI test suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^{tree})" = 1bdb54d12f79157578196063c1129bf49e55f4de
+          npm test -- __tests__/migrations-pinable-compat.test.ts __tests__/migrations-synthesis-json.test.ts __tests__/generated-flag-index.test.ts __tests__/ui-package.test.ts --maxWorkers=2 --minWorkers=1 2>&1 | tee "$RUNNER_TEMP/pr2060-focused.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr2060-focused-regression-log
+          path: ${{ runner.temp }}/pr2060-focused.log
+          if-no-files-found: ignore
+          retention-days: 7
