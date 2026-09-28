@@ -224,6 +224,9 @@ describe('Shared MCP daemon (issue #411)', () => {
     servers.push(server);
     sendInitialize(server.child, `file://${tempDir}`, 1);
     await waitFor(() => findResponse(server.stdout, 1), 10000);
+    // The proxy answers initialize locally and the pidfile precedes listen.
+    // Wait for an actual daemon handshake before opening the raw client.
+    await waitFor(() => server.stderr.some((l) => l.includes('Attached to shared daemon')), 10000);
     const pid = await waitFor(() => readLockPid(realRoot), 10000);
     const raw = net.connect(getDaemonSocketPath(realRoot));
     try {
