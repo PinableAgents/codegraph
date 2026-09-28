@@ -1,0 +1,105 @@
+name: Prepare reviewed PR 2060 resolution
+
+on:
+  push:
+    branches: [sync/pr2060-20260928-e63fe2ec]
+    paths: [.github/workflows/pinable-pr2060-integrate.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pinable-pr2060-resolution
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.repository == 'PinableAgents/codegraph'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      FORK_SHA: 8e752b21e7a631346df1b539eb4b4dbfaf8e7f84
+      UPSTREAM_SHA: e63fe2ec5b927d7c6f802b43649391c756979b31
+      EXPECTED_TREE: 1bdb54d12f79157578196063c1129bf49e55f4de
+      RESOLUTION_BRANCH: sync/pr2060-resolved-20260928
+      CODEGRAPH_TELEMETRY: '0'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: driver
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          path: source
+          ref: 8e752b21e7a631346df1b539eb4b4dbfaf8e7f84
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Decode the reviewed patch and verify its digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, gzip, hashlib, os
+          from pathlib import Path
+          encoded = Path('driver/.github/pr2060-resolution.patch.gz.b64').read_text().strip()
+          # Correct the known transport transcription; the exact decoded digest
+          # and complete resulting Git tree are both independently pinned.
+          encoded = encoded.replace('RRIOExP0R0HTv', 'RRIOExP0RHTv')
+          assert len(encoded) == 6964, 'Unexpected patch transport size'
+          patch = gzip.decompress(base64.b64decode(encoded, validate=True))
+          assert hashlib.sha256(patch).hexdigest() == 'b76edecae2dc08704d7a1ffe93fdf0d6555f7ffead107fbfb42a0dead0fd3543'
+          Path(os.environ['RUNNER_TEMP'], 'pr2060-resolution.patch').write_bytes(patch)
+          PY
+      - name: Reproduce and resolve the pinned three-way merge
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$FORK_SHA"
+          git config user.name 'Pinable conflict resolution'
+          git config user.email 'noreply@pinable.cc'
+          git switch -c "$RESOLUTION_BRANCH"
+          git remote add upstream https://github.com/colbymchenry/codegraph.git
+          git fetch --no-tags upstream "$UPSTREAM_SHA:refs/remotes/upstream/main"
+          if node scripts/pinable/sync-upstream.mjs --no-fetch; then
+            echo 'Expected the three reviewed conflicts, but the merge was different.' >&2
+            exit 1
+          fi
+          test "$(cat .git/MERGE_HEAD)" = "$UPSTREAM_SHA"
+          printf '%s\n' __tests__/generated-flag-index.test.ts __tests__/ui-package.test.ts src/db/migrations.ts > "$RUNNER_TEMP/expected-conflicts"
+          git diff --name-only --diff-filter=U > "$RUNNER_TEMP/actual-conflicts"
+          diff -u "$RUNNER_TEMP/expected-conflicts" "$RUNNER_TEMP/actual-conflicts"
+          git apply --check "$RUNNER_TEMP/pr2060-resolution.patch"
+          git apply "$RUNNER_TEMP/pr2060-resolution.patch"
+          git add -- src/db/migrations.ts __tests__/generated-flag-index.test.ts __tests__/ui-package.test.ts ui/src/lib/api.ts __tests__/migrations-pinable-compat.test.ts
+          node scripts/pinable/sync-upstream.mjs --finish
+          test -z "$(git ls-files -u)"
+          git diff --cached --check
+          test "$(git write-tree)" = "$EXPECTED_TREE"
+          git commit -m 'Merge upstream e63fe2ec to resolve PR #2060 conflicts' -m 'Retain both histories and both UI regression suites. Reconcile legacy Pinable schema v10 with upstream synthesis migrations at v12, preserve cursor indexes and migration data, and keep batched UI trail queries scoped to their originating project. Add real SQLite upgrade/idempotency and adapter-switch regressions.'
+          test "$(git show -s --format=%P HEAD)" = "$FORK_SHA $UPSTREAM_SHA"
+          node scripts/pinable/sync-upstream.mjs --check
+          node --test scripts/pinable/sync-upstream.test.mjs
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+      - name: Publish only the clean review branch, never main
+        working-directory: source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(gh api repos/PinableAgents/codegraph/git/ref/heads/main --jq .object.sha)" = "$FORK_SHA"
+          test "$(gh api repos/colbymchenry/codegraph/git/ref/heads/main --jq .object.sha)" = "$UPSTREAM_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          if git ls-remote --exit-code --heads origin "$RESOLUTION_BRANCH"; then
+            echo 'Resolution branch already exists; inspect rather than overwrite it.' >&2
+            exit 1
+          fi
+          git -c credential.helper='!gh auth git-credential' push https://github.com/PinableAgents/codegraph.git "HEAD:refs/heads/$RESOLUTION_BRANCH"
+          printf 'Prepared clean resolution commit: `%s`\n\nFull application and native-kernel CI must pass before updating the PR source main.\n' "$(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
