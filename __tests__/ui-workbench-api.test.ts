@@ -47,3 +47,34 @@ describe('工作台API边界',()=>{
     expect(()=>dispatchWorkbench(cg,root,'/api/browse',new URLSearchParams('root=../x'))).toThrow();
   });
 });
+
+
+it.each([false, true])('upstream compact module labels retain Pinable test filtering (bounded=%s)', (bounded) => {
+  const prefix = 'src/main/java/org/example/app';
+  const files = [`${prefix}/App.ts`, `${prefix}/core/a.ts`, `${prefix}/services/b.ts`];
+  for (const file of files) {
+    q.upsertFile({ path: file, language: 'typescript', contentHash: 'x', size: 1,
+      modifiedAt: 1, indexedAt: 1, nodeCount: 1 });
+    q.insertNodes([{ ...n(file), filePath: file }]);
+  }
+  q.insertEdges([{ source: files[1]!, target: files[2]!, kind: 'calls', confidence: 1 }]);
+  for (let i = 0; i < 405; i++) {
+    q.upsertFile({ path: `src/tests/group${i}/unit.test.ts`, language: 'typescript',
+      contentHash: 'test', size: 1, modifiedAt: 1, indexedAt: 1, nodeCount: 1 });
+  }
+  const result = buildMap(cg, root, new URLSearchParams({
+    root: 'src', depth: '2', tests: '0', bounded: bounded ? '1' : '0',
+  }));
+  expect(result.budget?.exceeded).not.toBe(true);
+  expect(result.modules.map(module => module.id).sort()).toEqual([
+    `${prefix}/(root files)`, `${prefix}/core`, `${prefix}/services`,
+  ].sort());
+  expect(result.modules.find(module => module.id === `${prefix}/core`)?.label)
+    .toBe('src/main/…/app/core');
+  expect(result.modules.every(module => !module.test)).toBe(true);
+  expect(result.links).toEqual(expect.arrayContaining([
+    expect.objectContaining({ source: `${prefix}/core`, target: `${prefix}/services`, count: 1 }),
+  ]));
+  const withTests = buildMap(cg, root, new URLSearchParams('root=src&depth=2&tests=1&bounded=1'));
+  expect(withTests.budget?.exceeded).toBe(true);
+});

@@ -1542,3 +1542,14 @@ it('keeps batched trail name requests scoped to the originating project', async 
   expect(previousNodes.mock.calls.every(([, passedSignal]) => passedSignal === signal)).toBe(true);
   expect(nextNodes).not.toHaveBeenCalled();
 });
+
+
+it('G6 keeps upstream compact module labels without changing full-path selection IDs', async () => {
+  const { graphScene } = await import('../ui/src/lib/graph-adapters');
+  const id = 'src/main/java/org/example/app/core';
+  const module = { id, label: 'src/main/…/app/core', files: 2, symbols: 3 };
+  const scene = graphScene('map', [{ id, type: 'module', position: { x: 0, y: 0 },
+    data: { layout: { module, width: 240, height: 64 } } }], []);
+  expect(scene.nodes).toHaveLength(1);
+  expect(scene.nodes[0]).toMatchObject({ id, label: module.label, width: 240, height: 64 });
+});
