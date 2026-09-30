@@ -8,6 +8,8 @@
 
 在本仓库中使用 Node 22.5+（低于 25）：
 
+自上游 1.6.1 同步起，浏览器 UI 入口需要显式设置 `CODEGRAPH_UI=1`；`ui`、`web` 和多项目工作区均适用。macOS/Linux 使用 `export CODEGRAPH_UI=1`，PowerShell 使用 `$env:CODEGRAPH_UI = '1'`。未设置时上游入口会提示浏览器 UI 尚未发布，后端索引与 MCP 不受影响。现有 G6 工作台没有删除。
+
 ```bash
 npm ci
 npm run build
