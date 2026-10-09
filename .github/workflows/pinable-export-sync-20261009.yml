@@ -1,0 +1,46 @@
+name: Export pinned upstream sync history 20261009
+on:
+  push:
+    branches: [maintenance/export-upstream-2026-10-09]
+    paths: [.github/workflows/pinable-export-sync-20261009.yml]
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 69f4e5d206c3f85aea2ae37142d77c43dfd725d0
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export reviewed repository history without any remote writes
+        shell: bash
+        env:
+          FORK_SHA: 69f4e5d206c3f85aea2ae37142d77c43dfd725d0
+          UPSTREAM_SHA: b635dd467f0578926a9c01a37b9d28d2b26689f1
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$FORK_SHA"
+          test "$(git rev-parse --is-shallow-repository)" = false
+          git remote add upstream https://github.com/colbymchenry/codegraph.git
+          git fetch --no-tags upstream refs/heads/main:refs/remotes/upstream/main
+          test "$(git rev-parse upstream/main)" = "$UPSTREAM_SHA"
+          git merge-base --is-ancestor 7639c787e48be92ea4ca83c5c014d8dd480de470 "$UPSTREAM_SHA"
+          git branch snapshot-fork "$FORK_SHA"
+          git branch snapshot-upstream "$UPSTREAM_SHA"
+          mkdir -p "$RUNNER_TEMP/sync-history"
+          git bundle create "$RUNNER_TEMP/sync-history/source.bundle" refs/heads/snapshot-fork refs/heads/snapshot-upstream
+          git bundle verify "$RUNNER_TEMP/sync-history/source.bundle"
+          git rev-list --left-right --count "$FORK_SHA...$UPSTREAM_SHA" > "$RUNNER_TEMP/sync-history/divergence.txt"
+          git log --format='%H %s' "$FORK_SHA..$UPSTREAM_SHA" > "$RUNNER_TEMP/sync-history/upstream-commits.txt"
+          printf 'fork=%s\nupstream=%s\n' "$FORK_SHA" "$UPSTREAM_SHA" > "$RUNNER_TEMP/sync-history/source-refs.txt"
+          (cd "$RUNNER_TEMP/sync-history" && sha256sum source.bundle > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codegraph-sync-history-20261009
+          path: ${{ runner.temp }}/sync-history/*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
