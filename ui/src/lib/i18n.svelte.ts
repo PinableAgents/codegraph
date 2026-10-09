@@ -83,6 +83,7 @@ const visibleCopy: Record<string, string> = {
   'Walking from the anchor…': '正在从锚点追踪…',
   'This has no body to read in order': '这里没有可按顺序阅读的主体',
   'What it sets in motion →': '它会启动什么 →',
+  'Its callers and callees →': '它的调用方与被调用方 →',
   'Start here →': '从这里开始 →',
   'Open as a flow →': '以调用流打开 →',
   'Arrives from': '到达自',

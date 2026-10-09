@@ -75,7 +75,7 @@ describe('Pinable/upstream schema-version collision (#2060)', () => {
 
   function assertSchema(db: SqliteDatabase): void {
     expect(getCurrentVersion(db)).toBe(CURRENT_SCHEMA_VERSION);
-    expect(CURRENT_SCHEMA_VERSION).toBe(12);
+    expect(CURRENT_SCHEMA_VERSION).toBe(15);
     expect(getPendingMigrations(db)).toEqual([]);
     expect(() => db.prepare('SELECT file_path FROM synthesis_inputs').all()).not.toThrow();
     for (const [index, columns] of Object.entries({
@@ -114,7 +114,7 @@ describe('Pinable/upstream schema-version collision (#2060)', () => {
     connection.close();
     connection = DatabaseConnection.open(dbPath);
     expect(getMigrationHistory(connection.getDb())).toEqual(history);
-    connection.getDb().exec('DELETE FROM schema_versions WHERE version = 12');
+    connection.getDb().exec('DELETE FROM schema_versions WHERE version >= 12');
     runMigrations(connection.getDb(), 11);
     assertSchema(connection.getDb());
     expect(connection.getDb().prepare('SELECT * FROM edges ORDER BY id').all()).toEqual(rows);

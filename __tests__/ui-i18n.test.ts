@@ -48,6 +48,26 @@ describe('Web UI i18n', () => {
     expect(i18n.t('nav.map')).toBe('地图');
   });
 
+  it('步骤页调用方入口随语言来回切换且不改变跳转目标', async () => {
+    const { i18n, localize } = await import('../ui/src/lib/i18n.svelte');
+    const root = document.createElement('main');
+    root.innerHTML = '<a href="#/symbol/entry">Its callers and callees →</a>';
+    document.body.append(root);
+    const action = localize(root);
+    try {
+      const link = root.querySelector('a')!;
+      expect(link.textContent).toBe('它的调用方与被调用方 →');
+      i18n.setLocale('en');
+      expect(link.textContent).toBe('Its callers and callees →');
+      i18n.setLocale('zh-CN');
+      expect(link.textContent).toBe('它的调用方与被调用方 →');
+      expect(link.getAttribute('href')).toBe('#/symbol/entry');
+    } finally {
+      action.destroy();
+      root.remove();
+    }
+  });
+
   it('读取已保存的英文偏好', async () => {
     storage.setItem('codegraph.ui.locale', 'en');
 

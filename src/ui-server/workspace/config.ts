@@ -15,7 +15,13 @@ function resolveOfflinePath(absolute: string): string {
     try {
       if (fs.lstatSync(absolute).isSymbolicLink()) return resolveOfflinePath(path.resolve(path.dirname(absolute), fs.readlinkSync(absolute)));
     } catch (statError) { if ((statError as NodeJS.ErrnoException).code !== 'ENOENT') throw statError; }
-    return path.join(resolveOfflinePath(path.dirname(absolute)), path.basename(absolute));
+    const parent = resolveOfflinePath(path.dirname(absolute));
+    // Windows can report ENOENT, not ENOTDIR, for a child of an ordinary
+    // file. A real ancestor must still be a directory before it can host
+    // offline descendants; do not hide malformed project paths as offline.
+    const parentStat = statIfPresent(parent);
+    if (parentStat && !parentStat.isDirectory()) throw new Error(`项目路径的祖先不是目录：${parent}`);
+    return path.join(parent, path.basename(absolute));
   }
 }
 
