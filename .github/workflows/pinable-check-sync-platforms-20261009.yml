@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: 5a72489f1d536e6cf76d786beb88754a43906f36
+          ref: b0b5e6447f38fda1675ac091a9e3c9f7868df0e3
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v6
@@ -29,8 +29,8 @@ jobs:
       - name: Verify exact reviewed tree and upstream ancestry
         shell: bash
         run: |
-          test "$(git rev-parse HEAD)" = 5a72489f1d536e6cf76d786beb88754a43906f36
-          test "$(git rev-parse HEAD^{tree})" = 9d3d850ef8d27b3c4bd79afa6d66d77fff395241
+          test "$(git rev-parse HEAD)" = b0b5e6447f38fda1675ac091a9e3c9f7868df0e3
+          test "$(git rev-parse HEAD^{tree})" = a40a62ac823bec6552da366a3a77751502659efd
           node scripts/pinable/sync-upstream.mjs --check
       - run: npm ci
       - run: npm run build
