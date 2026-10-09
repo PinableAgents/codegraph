@@ -54,3 +54,15 @@ it('非缺失路径错误不当作离线项目忽略', () => {
     expect(() => loadWorkspaceConfig(config)).toThrow();
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+it.each(['./file/child/grandchild', './alias/child/grandchild'])('非目录祖先的深层路径仍必须拒绝：%s', projectPath => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cg-config-file-ancestor-'));
+  try {
+    const ordinaryFile = path.join(dir, 'file');
+    fs.writeFileSync(ordinaryFile, '普通文件不能承载离线项目');
+    fs.symlinkSync(ordinaryFile, path.join(dir, 'alias'), 'file');
+    const config = path.join(dir, 'workspace.json');
+    fs.writeFileSync(config, JSON.stringify({ name: '错误配置', projects: [{ id: 'one', name: '项目', path: projectPath }] }));
+    expect(() => loadWorkspaceConfig(config)).toThrow();
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
