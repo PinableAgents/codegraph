@@ -1,0 +1,102 @@
+name: Prepare reviewed sync locale fix 20261009
+on:
+  push:
+    branches: [maintenance/export-upstream-2026-10-09]
+    paths: [.github/workflows/pinable-prepare-i18n-20261009.yml]
+permissions:
+  contents: read
+env:
+  SOURCE_SHA: 5a72489f1d536e6cf76d786beb88754a43906f36
+  EXPECTED_TREE: a40a62ac823bec6552da366a3a77751502659efd
+  PROPOSAL_BRANCH: maintenance/sync-i18n-proposal-2026-10-09
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 5a72489f1d536e6cf76d786beb88754a43906f36
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Apply the reviewed translation and locale round-trip test only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('ui/src/lib/i18n.svelte.ts');s=p.read_text()
+          needle="  'What it sets in motion →': '它会启动什么 →',\n";assert s.count(needle)==1
+          s=s.replace(needle,needle+"  'Its callers and callees →': '它的调用方与被调用方 →',\n");p.write_text(s)
+          p=Path('__tests__/ui-i18n.test.ts');s=p.read_text();needle="  it('读取已保存的英文偏好', async () => {";assert s.count(needle)==1
+          addition='''  it('步骤页调用方入口随语言来回切换且不改变跳转目标', async () => {
+              const { i18n, localize } = await import('../ui/src/lib/i18n.svelte');
+              const root = document.createElement('main');
+              root.innerHTML = '<a href="#/symbol/entry">Its callers and callees →</a>';
+              document.body.append(root);
+              const action = localize(root);
+              try {
+                const link = root.querySelector('a')!;
+                expect(link.textContent).toBe('它的调用方与被调用方 →');
+                i18n.setLocale('en');
+                expect(link.textContent).toBe('Its callers and callees →');
+                i18n.setLocale('zh-CN');
+                expect(link.textContent).toBe('它的调用方与被调用方 →');
+                expect(link.getAttribute('href')).toBe('#/symbol/entry');
+              } finally {
+                action.destroy();
+                root.remove();
+              }
+            });
+
+          '''
+          p.write_text(s.replace(needle,addition+needle))
+          PY
+          git add ui/src/lib/i18n.svelte.ts __tests__/ui-i18n.test.ts
+          git diff --cached --check
+          test "$(git write-tree)" = "$EXPECTED_TREE"
+          git config user.name PinableAgents
+          git config user.email 252275847+PinableAgents@users.noreply.github.com
+          git switch -c "$PROPOSAL_BRANCH"
+          git commit -m 'fix(i18n): localize the new upstream callers and callees link' -m 'Retain the exhaustive visible-copy test and add a Chinese-English-Chinese DOM localization round trip that also verifies the navigation target stays unchanged.'
+          mkdir -p "$RUNNER_TEMP/proposal"
+          git bundle create "$RUNNER_TEMP/proposal/source.bundle" "refs/heads/$PROPOSAL_BRANCH"
+          git log -1 --format='%H %T %P' > "$RUNNER_TEMP/proposal/source.txt"
+          (cd "$RUNNER_TEMP/proposal" && sha256sum source.bundle > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reviewed-sync-i18n-20261009
+          path: ${{ runner.temp }}/proposal/*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+  publish-proposal:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 5a72489f1d536e6cf76d786beb88754a43906f36
+          fetch-depth: 0
+      - uses: actions/download-artifact@v5
+        with:
+          name: reviewed-sync-i18n-20261009
+          path: proposal
+      - name: Publish only a new reviewed proposal branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd proposal && sha256sum -c SHA256SUMS)
+          git bundle verify proposal/source.bundle
+          git fetch proposal/source.bundle "refs/heads/$PROPOSAL_BRANCH:refs/remotes/proposal/head"
+          sha=$(git rev-parse refs/remotes/proposal/head)
+          test "$(git show -s --format=%T "$sha")" = "$EXPECTED_TREE"
+          test "$(git show -s --format=%P "$sha")" = "$SOURCE_SHA"
+          test "$(git ls-remote origin refs/heads/sync/upstream-2026-10-09 | cut -f1)" = "$SOURCE_SHA"
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = 69f4e5d206c3f85aea2ae37142d77c43dfd725d0
+          test -z "$(git ls-remote origin "refs/heads/$PROPOSAL_BRANCH")"
+          git push origin "$sha:refs/heads/$PROPOSAL_BRANCH"
+          echo "Proposal only; PR and main are unchanged: $sha"
