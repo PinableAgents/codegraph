@@ -1,0 +1,126 @@
+name: Prepare reviewed upstream sync 20261009
+on:
+  push:
+    branches: [maintenance/export-upstream-2026-10-09]
+    paths: [.github/workflows/pinable-prepare-sync-20261009.yml]
+permissions:
+  contents: read
+env:
+  FORK_SHA: 69f4e5d206c3f85aea2ae37142d77c43dfd725d0
+  UPSTREAM_SHA: b635dd467f0578926a9c01a37b9d28d2b26689f1
+  EXPECTED_TREE: 9d3d850ef8d27b3c4bd79afa6d66d77fff395241
+  SYNC_BRANCH: sync/upstream-2026-10-09
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Reproduce the locally reviewed real three-way merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          git show "$GITHUB_SHA:src/db/pinable-schema.ts" > "$RUNNER_TEMP/pinable-schema.ts"
+          git show "$GITHUB_SHA:__tests__/migrations-pinable-v12.test.ts" > "$RUNNER_TEMP/migrations-pinable-v12.test.ts"
+          git switch -c "$SYNC_BRANCH" "$FORK_SHA"
+          git config user.name PinableAgents
+          git config user.email 252275847+PinableAgents@users.noreply.github.com
+          git remote add upstream https://github.com/colbymchenry/codegraph.git
+          git fetch --no-tags upstream refs/heads/main:refs/remotes/upstream/main
+          test "$(git rev-parse upstream/main)" = "$UPSTREAM_SHA"
+          set +e
+          node scripts/pinable/sync-upstream.mjs --no-fetch > "$RUNNER_TEMP/merge.log" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/merge.log"
+          test "$status" = 1
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess, os, json, re, shutil
+          conflicts = set(subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines())
+          assert conflicts == {'package-lock.json','src/db/migrations.ts'}, conflicts
+          p=Path('package-lock.json'); s=p.read_text()
+          pattern=r'<<<<<<< HEAD\n      "version": "1\.6\.1",\n=======\n      "version": "1\.6\.2",\n>>>>>>> [0-9a-f]+'
+          s,n=re.subn(pattern,'      "version": "1.6.2",',s); assert n == 1
+          lock=json.loads(s); assert lock['packages']['ui']['dependencies']['@antv/g6']=='5.1.1'; p.write_text(s)
+          up=subprocess.check_output(['git','show',os.environ['UPSTREAM_SHA']+':src/db/migrations.ts'],text=True)
+          up=up.replace("import { referenceNameTail } from './reference-tail';", "import { referenceNameTail } from './reference-tail';\nimport { repairPinableSchema } from './pinable-schema';")
+          needle='export function runMigrations(db: SqliteDatabase, fromVersion: number): void {\n'; assert up.count(needle)==1
+          up=up.replace(needle,needle+'''  // Fork repairs inspect schema features rather than consuming upstream version
+            // numbers. Existing Pinable v10/v12 history rows must stay intact.
+            if (fromVersion <= CURRENT_SCHEMA_VERSION) {
+              repairPinableSchema(db, fromVersion, (version) => {
+                const migration = migrations.find((item) => item.version === version);
+                if (!migration) throw new Error(`Missing upstream migration ${version} for Pinable repair`);
+                migration.up(db);
+              });
+            }
+
+          ''')
+          Path('src/db/migrations.ts').write_text(up)
+          p=Path('src/db/index.ts');s=p.read_text()
+          old='    if (currentVersion < CURRENT_SCHEMA_VERSION) {\n      runMigrations(db, currentVersion);\n    }';assert s.count(old)==1
+          s=s.replace(old,'    // A current upstream database can still lack fork-only cursor indexes.\n    // Read-only connections returned above; never repair a newer schema here.\n    if (currentVersion <= CURRENT_SCHEMA_VERSION) {\n      runMigrations(db, currentVersion);\n    }');p.write_text(s)
+          p=Path('__tests__/migrations-pinable-compat.test.ts');s=p.read_text().replace('expect(CURRENT_SCHEMA_VERSION).toBe(12);','expect(CURRENT_SCHEMA_VERSION).toBe(15);').replace('DELETE FROM schema_versions WHERE version = 12','DELETE FROM schema_versions WHERE version >= 12');p.write_text(s)
+          shutil.copyfile(Path(os.environ['RUNNER_TEMP'])/'pinable-schema.ts','src/db/pinable-schema.ts')
+          shutil.copyfile(Path(os.environ['RUNNER_TEMP'])/'migrations-pinable-v12.test.ts','__tests__/migrations-pinable-v12.test.ts')
+          with Path('FORK.md').open('a') as f:
+            f.write('\n## 历史索引升级兼容\n\n本 fork 从上游 1.6.2 同步起沿用上游 schema v15。旧 Pinable 数据库曾使用 v10/v12 记录工作台相关迁移，与上游后续编号冲突；升级时按实际表和索引补齐缺失的 synthesis 与失败导入重试能力，保留原迁移历史、图数据和游标分页索引。只读连接不会执行修复，已正常升级的数据库重复打开不会重复写入修复数据。\n\n后续 fork 专属修复统一放在 `src/db/pinable-schema.ts`，通过特征检测和事务执行，不再占用上游数字迁移编号；上游迁移体复用原实现，避免两份 SQL 漂移。源码同步与运行时 Release 发布仍是分开的步骤。\n')
+          PY
+          git add package-lock.json src/db/migrations.ts src/db/index.ts src/db/pinable-schema.ts __tests__/migrations-pinable-compat.test.ts __tests__/migrations-pinable-v12.test.ts FORK.md
+          node scripts/pinable/sync-upstream.mjs --finish
+          tree=$(git write-tree)
+          echo "Prepared tree: $tree"
+          test "$tree" = "$EXPECTED_TREE"
+          git commit -m 'merge: sync 257 upstream commits with Pinable schema compatibility' -m 'Preserve both parents, G6, workspace, locale/theme customizations and runtime packaging. Resolve lock version and legacy v12 schema collision by feature-detected transactional repairs without claiming upstream migration numbers. No release or main update.'
+          node scripts/pinable/sync-upstream.mjs --check
+          test "$(git show -s --format=%P HEAD)" = "$FORK_SHA $UPSTREAM_SHA"
+          mkdir -p "$RUNNER_TEMP/proposal"
+          git bundle create "$RUNNER_TEMP/proposal/source.bundle" "refs/heads/$SYNC_BRANCH"
+          git log -1 --format='%H %T %P' > "$RUNNER_TEMP/proposal/source.txt"
+          cp "$RUNNER_TEMP/merge.log" "$RUNNER_TEMP/proposal/"
+          (cd "$RUNNER_TEMP/proposal" && sha256sum source.bundle > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reviewed-sync-proposal-20261009
+          path: ${{ runner.temp }}/proposal/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+  publish-sync-branch:
+    needs: prepare
+    if: github.repository == 'PinableAgents/codegraph' && github.ref == 'refs/heads/maintenance/export-upstream-2026-10-09'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 69f4e5d206c3f85aea2ae37142d77c43dfd725d0
+          fetch-depth: 0
+      - uses: actions/download-artifact@v5
+        with:
+          name: reviewed-sync-proposal-20261009
+          path: proposal
+      - name: Push only the reviewed sync branch with concurrency guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd proposal && sha256sum -c SHA256SUMS)
+          git bundle verify proposal/source.bundle
+          git fetch proposal/source.bundle "refs/heads/$SYNC_BRANCH:refs/remotes/proposal/head"
+          sha=$(git rev-parse refs/remotes/proposal/head)
+          test "$(git show -s --format=%T "$sha")" = "$EXPECTED_TREE"
+          test "$(git show -s --format=%P "$sha")" = "$FORK_SHA $UPSTREAM_SHA"
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$FORK_SHA"
+          test "$(git ls-remote origin "refs/heads/$SYNC_BRANCH" | cut -f1)" = "$FORK_SHA"
+          test "$(git ls-remote https://github.com/colbymchenry/codegraph.git refs/heads/main | cut -f1)" = "$UPSTREAM_SHA"
+          git push origin "$sha:refs/heads/$SYNC_BRANCH"
+          echo "Proposal only, main unchanged: $sha"
