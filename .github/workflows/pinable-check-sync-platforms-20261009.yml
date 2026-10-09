@@ -1,0 +1,55 @@
+name: Desktop compatibility for reviewed sync 20261009
+on:
+  push:
+    branches: [maintenance/export-upstream-2026-10-09]
+    paths: [.github/workflows/pinable-check-sync-platforms-20261009.yml]
+permissions:
+  contents: read
+env:
+  CODEGRAPH_TELEMETRY: '0'
+  DO_NOT_TRACK: '1'
+jobs:
+  compatibility:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 5a72489f1d536e6cf76d786beb88754a43906f36
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.21.0'
+          cache: npm
+      - name: Verify exact reviewed tree and upstream ancestry
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = 5a72489f1d536e6cf76d786beb88754a43906f36
+          test "$(git rev-parse HEAD^{tree})" = 9d3d850ef8d27b3c4bd79afa6d66d77fff395241
+          node scripts/pinable/sync-upstream.mjs --check
+      - run: npm ci
+      - run: npm run build
+      - run: npm run build:lib
+      - name: Real database, G6, workspace, locale and theme regression tests
+        shell: bash
+        run: >-
+          npm test -- __tests__/migrations-pinable-compat.test.ts
+          __tests__/migrations-pinable-v12.test.ts
+          __tests__/ui-workspace.test.ts __tests__/ui-workspace-config.test.ts
+          __tests__/ui-workbench-query.test.ts __tests__/ui-workbench-api.test.ts
+          __tests__/ui-g6-runtime.test.ts __tests__/ui-g6-layout.test.ts
+          __tests__/ui-i18n.test.ts __tests__/ui-theme-preference.test.ts
+          __tests__/ui-legend-i18n.test.ts __tests__/child-process-windows-hide.test.ts
+          --maxWorkers=2 --minWorkers=1 2>&1 | tee desktop-compatibility.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sync-desktop-compatibility-${{ matrix.os }}
+          path: desktop-compatibility.log
+          if-no-files-found: ignore
+          retention-days: 14
