@@ -22,7 +22,7 @@ import { kindBonus, nameMatchBonus, scorePathRelevance } from '../search/query-u
 import { parseQuery, boundedEditDistance } from '../search/query-parser';
 import { isGeneratedFile } from '../extraction/generated-detection';
 import { splitIdentifierSegments } from '../search/identifier-segments';
-import { referenceNameTail } from './reference-tail';
+import { isModuleKey, referenceNameTail } from './reference-tail';
 
 /**
  * Files that should not be candidates for "dominant file" detection: test/spec
@@ -3952,8 +3952,14 @@ export class QueryBuilder {
    * reference still waits for its own name too, looked up by its whole name:
    * a fresh index links a binding whose module never resolves it by that
    * name alone, to whichever declaration carries it.
+   *
+   * A module key has a ceiling of its own, `perModuleCeiling`. What waits
+   * under it imports a module of that name, so a large population is not
+   * noise: it is every importer of a package whose `__init__.py` was missing
+   * (`from fastapi import FastAPI` across a whole test suite), which the file
+   * that just appeared resolves at once. The ceiling only bounds the work.
    */
-  getRetryableFailedReferences(names: string[], perNameCeiling: number = 500): UnresolvedReference[] {
+  getRetryableFailedReferences(names: string[], perNameCeiling: number = 500, perModuleCeiling: number = 5000): UnresolvedReference[] {
     if (names.length === 0) return [];
 
     const lookups = [
@@ -3974,7 +3980,8 @@ export class QueryBuilder {
           .prepare(`SELECT ${column} AS key, COUNT(*) AS count FROM unresolved_refs WHERE ${where} AND ${column} IN (${placeholders}) GROUP BY ${column}`)
           .all(...chunk) as Array<{ key: string; count: number }>;
         for (const row of counts) {
-          if (row.count <= perNameCeiling) retryKeys.push(row.key);
+          const ceiling = column === 'name_tail' && isModuleKey(row.key) ? perModuleCeiling : perNameCeiling;
+          if (row.count <= ceiling) retryKeys.push(row.key);
         }
       }
 
@@ -4129,6 +4136,11 @@ export class QueryBuilder {
     return changed;
   }
 
+  /** The highest edge id so far: edges inserted later have higher ids (AUTOINCREMENT). */
+  getMaxEdgeId(): number {
+    return (this.db.prepare('SELECT COALESCE(MAX(id), 0) AS id FROM edges').get() as { id: number }).id;
+  }
+
   /**
    * Resolution edges whose TARGET symbol is named one of `names` — the edges a
    * sync must re-resolve after `names` gained or lost a definition (CG-33).
@@ -4152,15 +4164,24 @@ export class QueryBuilder {
    * population the name is generic (`get`, `clear`, …), one definition changing
    * won't flip most of them, and rebinding an arbitrary subset is both wasted
    * work and incoherent coverage.
+   *
+   * With `countedUpToEdgeId`, only edges up to that id count toward the
+   * ceiling: the ones a sync's failed-ref retry made just now were resolved
+   * against the graph this sync built, and relinking every `from django.urls
+   * import path` must not push `path` over the ceiling and leave the edges the
+   * new definitions moved unrebound. They are still returned under a name
+   * that stays below it.
    */
   getResolutionEdgesByTargetName(
     names: string[],
-    perNameCeiling: number = 500
+    perNameCeiling: number = 500,
+    countedUpToEdgeId?: number
   ): Array<Edge & { edgeId: number; sourceFilePath: string; sourceLanguage: Language }> {
     if (names.length === 0) return [];
 
     // Pass 1: per-name edge counts, chunked under the SQLite parameter limit.
     const keep: string[] = [];
+    const counted = countedUpToEdgeId === undefined ? '' : 'AND e.id <= ?';
     for (let i = 0; i < names.length; i += SQLITE_PARAM_CHUNK_SIZE) {
       const chunk = names.slice(i, i + SQLITE_PARAM_CHUNK_SIZE);
       const placeholders = chunk.map(() => '?').join(',');
@@ -4171,9 +4192,10 @@ export class QueryBuilder {
              JOIN nodes tgt ON tgt.id = e.target
             WHERE tgt.name IN (${placeholders})
               AND (e.provenance IS NULL OR e.provenance != 'heuristic')
+              ${counted}
             GROUP BY tgt.name`
         )
-        .all(...chunk) as Array<{ name: string; count: number }>;
+        .all(...chunk, ...(countedUpToEdgeId === undefined ? [] : [countedUpToEdgeId])) as Array<{ name: string; count: number }>;
       for (const row of counts) {
         if (row.count <= perNameCeiling) keep.push(row.name);
       }
@@ -4206,6 +4228,46 @@ export class QueryBuilder {
       }
     }
     return out;
+  }
+
+  /**
+   * The resolution edges out of route nodes that a change to `filePaths` can
+   * move: from a route in another file, to a node of one of `filePaths`, or to
+   * a value declared beside the route — what a route rendering
+   * `const Docs = lazy(() => import('./pages/Docs'))` binds to while that
+   * module is missing. Returned with the route's file and language, which a
+   * resurrection needs, in the order they were written, so references put
+   * back resolve in that order again. Synthesized edges carry no reference to
+   * resurrect and are left out.
+   */
+  getRouteEdgesMovedBy(filePaths: readonly string[]): Array<Edge & {
+    edgeId: number;
+    sourceFilePath: string;
+    sourceLanguage: Language;
+  }> {
+    if (filePaths.length === 0) return [];
+    const files = JSON.stringify(filePaths);
+    const rows = this.db
+      .prepare(
+        `SELECT e.*, src.file_path AS source_file_path, src.language AS source_language
+           FROM nodes src
+           JOIN edges e ON e.source = src.id
+           JOIN nodes tgt ON tgt.id = e.target
+          WHERE src.kind = 'route'
+            AND e.kind != 'contains'
+            AND (e.provenance IS NULL OR e.provenance != 'heuristic')
+            AND src.file_path NOT IN (SELECT value FROM json_each(?))
+            AND (tgt.file_path IN (SELECT value FROM json_each(?))
+              OR (tgt.file_path = src.file_path AND tgt.kind IN ('constant', 'variable')))
+          ORDER BY e.id`
+      )
+      .all(files, files) as Array<EdgeRow & { source_file_path: string; source_language: Language }>;
+    return rows.map((row) => ({
+      ...rowToEdge(row),
+      edgeId: row.id,
+      sourceFilePath: row.source_file_path,
+      sourceLanguage: row.source_language,
+    }));
   }
 
   /** Delete edges by primary key — the rebind pass's half of a re-resolution. */

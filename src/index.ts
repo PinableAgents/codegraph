@@ -52,7 +52,7 @@ import {
   createResolver,
   ResolutionResult,
 } from './resolution';
-import { hasSynthesisPattern } from './resolution/callback-synthesizer';
+import { hasSynthesisPattern, isJsxChildCandidate } from './resolution/callback-synthesizer';
 import { GraphTraverser, GraphQueryManager } from './graph';
 import { findNamedCopybooks, type NamedCopybook } from './graph/cobol-copybooks';
 import { ContextBuilder, createContextBuilder } from './context';
@@ -940,6 +940,19 @@ export class CodeGraph {
             }
           });
 
+        // A component a tag in an unchanged file may render: `<Team />` links
+        // to the `Team` this sync adds. The gate above reads each changed file
+        // on its own, and a component with no markup of its own (`return null`,
+        // a wrapper) matches none of its patterns. Removing one needs no check:
+        // a component a tag rendered had synthesized edges into its file.
+        if (!refreshSynthesis && result.definitionDelta && result.changedFilePaths) {
+          const delta = new Set(result.definitionDelta);
+          if (this.queries.getNodesByFiles(result.changedFilePaths).some((n) => delta.has(n.name) && isJsxChildCandidate(n))) {
+            refreshSynthesis = true;
+            this.queries.setMetadata('synthesis_pending', '1');
+          }
+        }
+
         // Fold the store phase's WAL BEFORE the post-store reads below
         // (resolution reads on the main thread) — same rationale as
         // indexAll's fold between store and resolution.
@@ -985,6 +998,10 @@ export class CodeGraph {
 
         // Resolve references if files were updated
         const filesChanged = result.filesAdded > 0 || result.filesModified > 0;
+        // The last edge before the failed-ref retry below: the rebind's
+        // per-name ceiling counts only edges up to it (see
+        // resurrectStaleResolutionEdges).
+        let edgesBeforeRetry: number | undefined;
         if (filesChanged) {
           if (result.changedFilePaths) {
             // Scope resolution to changed files (git fast path — bounded set)
@@ -1024,6 +1041,7 @@ export class CodeGraph {
             // an edit can satisfy it as well as an added file. On a sync
             // where no failed ref matches, this is one indexed lookup.
             const tRetry = Date.now();
+            edgesBeforeRetry = this.queries.getMaxEdgeId();
             const retryable = this.queries.getRetryableFailedReferences([...new Set([
               ...this.queries.getNodeNamesByFiles(result.changedFilePaths),
               ...result.changedFilePaths.flatMap(moduleReferenceKeys),
@@ -1109,12 +1127,25 @@ export class CodeGraph {
           const tRebind = Date.now();
           const rebound = this.orchestrator.resurrectStaleResolutionEdges(
             result.definitionDelta,
-            result.changedFilePaths ?? []
+            result.changedFilePaths ?? [],
+            edgesBeforeRetry
           );
           if (process.env.CODEGRAPH_SYNTH_TIMINGS) {
             console.error(
               `[phase-timing] sync-rebind: ${Date.now() - tRebind}ms (${result.definitionDelta.length} changed names, ${rebound} edges re-opened)`
             );
+          }
+        }
+
+        // The same for a route whose answer is read from a module: one that
+        // renders `const Docs = lazy(() => import('./pages/Docs'))` binds to
+        // the component the module exports, so it moves when the module is
+        // added or edited, though no name it carries changes.
+        if (filesChanged && result.changedFilePaths) {
+          const tModules = Date.now();
+          const reopened = this.resolver.reopenRouteModuleReaders(result.changedFilePaths);
+          if (process.env.CODEGRAPH_SYNTH_TIMINGS) {
+            console.error(`[phase-timing] sync-route-modules: ${Date.now() - tModules}ms (${reopened} refs re-opened)`);
           }
         }
 
