@@ -4,6 +4,7 @@ import os
 import stat
 from pathlib import Path
 import struct
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -101,6 +102,66 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(r.node_archive_name('win32-arm64', 'v24.21.0'), 'node-v24.21.0-win-arm64.zip')
         self.assertEqual(r.launcher_name('linux-x64'), 'codegraph-launcher_linux_amd64')
         with self.assertRaises(ValueError): r.node_archive_name('unknown', 'v24.21.0')
+
+    def smoke_bundle(self, target):
+        root_name = 'codegraph-' + target
+        node_name = 'node.exe' if target.startswith('win32-') else 'node'
+        archive = self.root / r.archive_name(target)
+        with zipfile.ZipFile(archive, 'w') as zf:
+            zf.writestr(root_name + '/' + node_name, b'fixture-node')
+            zf.writestr(root_name + '/runtime.json', b'fixture-runtime')
+        launcher = self.root / r.launcher_name(target)
+        launcher.write_bytes(b'fixture-launcher')
+        meta = {'archiveRoot': root_name, 'nodeExecutable': node_name, 'componentVersion': '1.6.2',
+                'source': {'revision': 'a'*40}, 'archive': r.describe_file(archive),
+                'launcher': r.describe_file(launcher)}
+        r.write_json(self.root / f'codegraph-{target}.json', meta)
+        return meta
+
+    def test_smoke_prepares_both_layouts_before_execution(self):
+        for target in r.TARGETS:
+            with self.subTest(target=target):
+                meta = self.smoke_bundle(target)
+                calls = []
+
+                def execute(command, *, env, check, timeout):
+                    calls.append((command, env))
+                    bundle = Path(calls[0][0][-1])
+                    home = bundle.parent / 'Pinable home 含 空格'
+                    managed = home / 'components/codegraph' / meta['componentVersion']
+                    standalone = home / 'bin' / ('codegraph.exe' if target.startswith('win32-') else 'codegraph')
+                    for layout in (bundle, managed):
+                        self.assertEqual((layout / meta['nodeExecutable']).read_bytes(), b'fixture-node')
+                        self.assertEqual((layout / 'runtime.json').read_bytes(), b'fixture-runtime')
+                    self.assertEqual(standalone.read_bytes(), b'fixture-launcher')
+                    if len(calls) == 1:
+                        self.assertEqual(Path(command[0]), bundle / meta['nodeExecutable'])
+                        self.assertNotIn('PINABLE_HOME', env)
+                    else:
+                        self.assertEqual(Path(command[0]), managed / meta['nodeExecutable'])
+                        self.assertEqual(command[-2:], [str(managed), str(standalone)])
+                        self.assertEqual(env.get('PINABLE_HOME'), str(home) if len(calls) == 3 else None)
+                    self.assertTrue(check)
+                    self.assertEqual(timeout, 180)
+
+                with patch.object(r, 'OUT', self.root), patch.object(r.subprocess, 'run', side_effect=execute), \
+                        patch.dict(os.environ, {'PINABLE_HOME': 'inherited-home'}):
+                    r.verify_bundle(target)
+                self.assertEqual(len(calls), 3)
+                report = r.read_json(self.root / f'codegraph-{target}.smoke.json')
+                self.assertTrue(report['ok'])
+                self.assertEqual(report['archive'], meta['archive'])
+                self.assertEqual(report['launcher'], meta['launcher'])
+
+    def test_smoke_failure_does_not_produce_passing_report(self):
+        target = 'win32-x64'
+        self.smoke_bundle(target)
+        for failed_call in range(3):
+            with self.subTest(failed_call=failed_call):
+                results = [None]*failed_call + [subprocess.CalledProcessError(1, 'smoke')]
+                with patch.object(r, 'OUT', self.root), patch.object(r.subprocess, 'run', side_effect=results):
+                    with self.assertRaises(subprocess.CalledProcessError): r.verify_bundle(target)
+                self.assertFalse((self.root / f'codegraph-{target}.smoke.json').exists())
 
     def records(self):
         source = {'repository': 'PinableAgents/codegraph', 'revision': 'a'*40, 'version': '1.6.0',
