@@ -22,7 +22,10 @@ import {
   localReceiverTypePatterns,
   normalizeInferredTypeName,
   goRefQualifier,
+  inferLocalReceiverType,
+  arrayElementType,
 } from './name-matcher';
+import { JS_ARRAY_METHODS } from './js-builtins';
 
 /**
  * Extension resolution order by language
@@ -3108,28 +3111,56 @@ export function isBoundToOutOfRepoImport(
 }
 
 /**
- * The tail a reference that failed to resolve is parked under when its name
- * is an import binding the module it imports does not declare by that name:
- * a default import (`import tagsController from './tag/tag.controller'`, a
- * CommonJS `require`), a namespace import, or an aliased one (`import {
- * Component as Wrapper }`, `{ default as X }`). Resolution reaches it through
- * the module, so a sync's retry has to find it by the module: under the
- * module's {@link moduleTail} ('module:tag'), the key a sync looks up for
- * every file it adds or changes. Its own name, the default tail, is one the
- * module never declares, so the file that appears or gains the export never
- * found it. A sync still looks it up by that name as well: a binding its
- * module never resolves is linked by the name alone.
+ * The tail a reference that failed to resolve is parked under when it goes
+ * through an import binding the module's key finds and its own tail does not:
+ *  - the binding's whole name, when the module it imports does not declare it
+ *    by that name: a default import (`import tagsController from
+ *    './tag/tag.controller'`, a CommonJS `require`), a namespace import, or an
+ *    aliased one (`import { Component as Wrapper }`, `{ default as X }`) — the
+ *    import itself, a call, `new`, a JSX tag, a value. Its own name, the
+ *    default tail, is one the module never declares. A sync still looks it up
+ *    by that name as well: a binding its module never resolves is linked by
+ *    the name alone.
+ *  - a direct member of any binding, a named import's included
+ *    (`NODE_PATH_EXCLUDELIST.includes(p)`, `store.get(k)`, `NS.make()`). It
+ *    reaches the binding's declaration, or a member of it, through the module,
+ *    and its default tail is the member's name (`includes`, `get`), which the
+ *    module seldom declares and which too many other failed refs share for the
+ *    retry to look it up. A sync still looks it up by that member's name, which
+ *    is the member a namespace import's barrel forwards or the method a guess
+ *    by name links, and by its receiver's, which a barrel's source declares.
+ *    A chain (`URI.file(p).toString()`) or a longer path
+ *    (`vscode.window.showErrorMessage`) keeps its member's name: what its last
+ *    member hangs off is what another member returns or holds, seldom a type
+ *    the module declares. Parked under the module as well, they tripled the
+ *    refs an edit of a hot module retries on vscode, and none of them resolved.
+ *  - a direct member call on a local the file declares with a type it
+ *    imports (`const cache = new LRUCache(10)`, `cache: LRUCache<K, V>`, a
+ *    typed parameter, then `cache.get(k)`), but not an array of it:
+ *    resolution reads that declaration and calls the member of the class,
+ *    which the type's binding imports, so the call waits for that module as a
+ *    member of the binding itself does.
+ * Resolution reaches each through the module, so a sync's retry has to find
+ * it by the module: under the module's {@link moduleTail} ('module:tag'), the
+ * key a sync looks up for every file it adds or changes, so the file that
+ * appears or gains the export finds it.
  *
- * Only a whole-name reference to the binding — the import itself, a call,
- * `new`, a JSX tag, a value — and only for a module of the project: a member
- * read (`NS.member`) waits for the member's name, and a package's binding
- * keeps its tail. Undefined for every other reference.
+ * Only for a module of the project: a package's binding keeps its tail.
+ * Undefined for every other reference, and for the whole name of an
+ * unaliased named import, which is the name its module declares. A Python
+ * reference is {@link pythonImportBindingTail}'s, by its whole name only.
  */
 export function importBindingTail(ref: UnresolvedRef, context: ResolutionContext): string | undefined {
   if (ref.language === 'python') return pythonImportBindingTail(ref, context);
-  if (!ESM_IMPORT_LANGUAGES.has(ref.language) || !IDENTIFIER.test(ref.referenceName)) return undefined;
-  const binding = context.getImportMappings(ref.filePath, ref.language).find((m) => m.localName === ref.referenceName);
-  if (!binding || (!binding.isDefault && !binding.isNamespace && binding.exportedName === binding.localName)) return undefined;
+  if (!ESM_IMPORT_LANGUAGES.has(ref.language)) return undefined;
+  // An import's dotted name is a path, not a member.
+  const receiver = ref.referenceKind === 'imports' ? undefined : MEMBER_RECEIVER.exec(ref.referenceName)?.[1];
+  const name = receiver ?? ref.referenceName;
+  if (!receiver && !IDENTIFIER.test(name)) return undefined;
+  const mappings = context.getImportMappings(ref.filePath, ref.language);
+  const binding = mappings.find((m) => m.localName === name) ??
+    (receiver && ref.referenceKind === 'calls' ? localTypeBinding(receiver, ref, context, mappings) : undefined);
+  if (!binding || (!receiver && !binding.isDefault && !binding.isNamespace && binding.exportedName === binding.localName)) return undefined;
   if (isExternalImport(binding.source, ref.language, context) &&
       // A monorepo app's own tsconfig alias (`#/views/…`): isExternalImport reads the root's only.
       !context.getNearestAliases?.(ref.filePath)?.patterns.some((p) => p.prefix !== '' && binding.source.startsWith(p.prefix))) {
@@ -3236,4 +3267,29 @@ export function pythonModulePath(source: string, fromFile: string): string | nul
   return modulePath === '..' || modulePath.startsWith('../') ? null : modulePath;
 }
 
+/**
+ * The import binding of the type a call's receiver is declared with, read the
+ * way resolution reads it for the call (inferLocalReceiverType, memoized per
+ * file, scope and receiver, so a call the matcher just tried costs a lookup):
+ * the binding the type is written through, `LRUCache` of `new LRUCache<K,
+ * V>(…)` or `lib` of `new lib.LRUCache()`, of the element type of an array
+ * (`results: URI[]`), or of the type whose property it is (`Emitter<E>['event']`).
+ * Undefined for a type the file doesn't import, in a file that imports
+ * nothing, and for a method arrays have called on an array (`results.push(…)`):
+ * resolution links that to no project class, so no edit of the type's module
+ * does. Such calls were most of what this parked on vscode, and retrying them
+ * nearly doubled what an edit of `uri.ts` retried.
+ */
+function localTypeBinding(receiver: string, ref: UnresolvedRef, context: ResolutionContext, mappings: ImportMapping[]): ImportMapping | undefined {
+  if (mappings.length === 0) return undefined;
+  const decl: { raw?: string } = {};
+  const type = inferLocalReceiverType(receiver, ref, context, decl);
+  if (!type || !decl.raw) return undefined;
+  if (arrayElementType(type) !== undefined && JS_ARRAY_METHODS.has(ref.referenceName.slice(receiver.length + 1))) return undefined;
+  const head = decl.raw.split(/[.<[\s]/)[0];
+  return mappings.find((m) => m.localName === head);
+}
+
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+/** The receiver of a direct member reference: `store` of `store.get`, none of `store.get().then` or `a.b.c`. */
+const MEMBER_RECEIVER = /^([A-Za-z_$][\w$]*)\.[A-Za-z_$][\w$]*$/;
