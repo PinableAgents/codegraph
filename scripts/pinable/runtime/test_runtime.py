@@ -1,5 +1,7 @@
 import io
 import json
+import os
+import stat
 from pathlib import Path
 import struct
 import tarfile
@@ -97,21 +99,21 @@ class RuntimeTests(unittest.TestCase):
 
     def test_target_names(self):
         self.assertEqual(r.node_archive_name('win32-arm64', 'v24.21.0'), 'node-v24.21.0-win-arm64.zip')
-        self.assertEqual(r.launcher_name('linux-x64'), 'codegraph_linux_amd64')
+        self.assertEqual(r.launcher_name('linux-x64'), 'codegraph-launcher_linux_amd64')
         with self.assertRaises(ValueError): r.node_archive_name('unknown', 'v24.21.0')
 
     def records(self):
         source = {'repository': 'PinableAgents/codegraph', 'revision': 'a'*40, 'version': '1.6.0',
                   'nodeVersion': r.settings()['nodeVersion'], 'releaseTag': 'pinable-runtime-v1.6.0-'+'a'*12}
         for target, (goos, goarch) in r.TARGETS.items():
-            archive = self.root / ('codegraph-'+target+('.zip' if goos == 'windows' else '.tar.gz'))
+            archive = self.root / r.archive_name(target)
             launcher = self.root / r.launcher_name(target)
             archive.write_bytes(b'fixture-archive')
             launcher.write_bytes(b'fixture-launcher')
             record = {'schemaVersion':1, 'component':'codegraph', 'source':source, 'target':target, 'goos':goos, 'goarch':goarch,
-                      'nativeKernel':{'required':True}, 'archive':r.describe_file(archive), 'launcher':r.describe_file(launcher)}
+                      'nativeKernel':{'required':True}, 'contractVersion':'1', 'componentVersion':source['version'], 'archive':r.describe_file(archive), 'launcher':r.describe_file(launcher)}
             r.write_json(self.root / f'codegraph-{target}.json', record)
-            r.write_json(self.root / f'codegraph-{target}.smoke.json', {'ok':True, 'source':source, 'target':target})
+            r.write_json(self.root / f'codegraph-{target}.smoke.json', {'ok':True, 'source':source, 'target':target, 'archive':record['archive'], 'launcher':record['launcher']})
 
     def test_manifest_complete(self):
         self.records()
@@ -153,6 +155,30 @@ class RuntimeTests(unittest.TestCase):
         file = self.root / 'codegraph-linux-x64.json'
         data = r.read_json(file); data['archive']['file'] = '../escape'; r.write_json(file, data)
         with self.assertRaisesRegex(ValueError, 'filename'): r.aggregate(self.root)
+
+    def test_smoke_evidence_cannot_be_reused_for_different_bytes(self):
+        self.records()
+        file = self.root / 'codegraph-linux-x64.json'
+        data = r.read_json(file)
+        archive = self.root / data['archive']['file']
+        archive.write_bytes(b'replaced-archive')
+        data['archive'] = r.describe_file(archive)
+        r.write_json(file, data)
+        with self.assertRaisesRegex(ValueError, 'smoke evidence'): r.aggregate(self.root)
+
+    def test_desktop_zip_contains_only_regular_files_and_directories(self):
+        source = self.root / 'bundle'
+        source.mkdir()
+        (source / 'target').write_text('fixture')
+        if os.name != 'nt':
+            (source / 'link').symlink_to('target')
+        archive = self.root / r.archive_name('linux-x64')
+        r.archive_tree(source, archive, 1789888599)
+        with zipfile.ZipFile(archive) as zf:
+            self.assertTrue(all(stat.S_ISREG(i.external_attr >> 16) or stat.S_ISDIR(i.external_attr >> 16)
+                                for i in zf.infolist()))
+            if os.name != 'nt':
+                self.assertEqual(zf.read('bundle/link'), b'fixture')
 
     def test_download_origin(self):
         with self.assertRaises(ValueError): r.download('https://untrusted.example/node.zip', self.root / 'node.zip')
