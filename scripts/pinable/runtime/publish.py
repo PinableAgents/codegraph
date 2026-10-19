@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish a validated, immutable stable runtime without changing upstream latest."""
+"""Publish validated, immutable runtimes from main pushes or requested manual runs."""
 import argparse
 import json
 import os
@@ -39,8 +39,10 @@ def validate(directory, expected_commit):
 
 def publish(directory, expected_commit):
     runtime.require(os.environ.get("GITHUB_REPOSITORY") == REPOSITORY and
-                    os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch" and
-                    os.environ.get("GITHUB_REF") == "refs/heads/main", "publication is manual and main-only")
+                    os.environ.get("GITHUB_EVENT_NAME") in ("push", "workflow_dispatch") and
+                    os.environ.get("GITHUB_REF") == "refs/heads/main" and
+                    os.environ.get("GITHUB_SHA") == expected_commit,
+                    "publication requires a main push or manual run at the expected source")
     manifest, files = validate(directory, expected_commit)
     base = f"repos/{REPOSITORY}"
     runtime.require(api(base + "/git/ref/heads/main")["object"]["sha"] == expected_commit,

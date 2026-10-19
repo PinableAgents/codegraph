@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: 'Publish a new stable Pinable runtime (main only; never npm or latest)'
+        description: 'Publish this manual main build; main pushes already publish automatically'
         type: boolean
         default: false
 
@@ -204,7 +204,9 @@ jobs:
 
   publish:
     needs: collect
-    if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main' && github.repository == 'PinableAgents/codegraph'
+    if: >-
+      github.repository == 'PinableAgents/codegraph' && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     permissions:
