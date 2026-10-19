@@ -62,7 +62,7 @@ PINABLE_HOME/
 
 应用构建一次，用 `npm ci --omit=dev --ignore-scripts` 安装锁定生产依赖。六个目标各自在原生 runner 上从 Cargo.lock 构建 kernel 和 Go 启动器。Node 固定为 `.pinable/runtime.json` 中的 v24.21.0，从官方 HTTPS 源下载，并在解压前核对官方 SHASUMS256.txt。该校验不是 GPG 或代码签名验证。
 
-每个目标对实际 ZIP 解压后的文件执行：Node 版本和平台、SQLite/FTS5、原生 kernel 合约与提取、首次索引和增量同步、文件监听、CLI 成功/失败退出码、stdio MCP initialize/tools-list/EOF 退出。还将同一 bundle 移入含中文和空格的 Desktop 布局，使用独立启动器分别验证显式 PINABLE_HOME 和自动推导 home。缺 kernel、viewer/WASM、目标不全、混合源码或 smoke 哈希不符时禁止汇总发布。
+每个目标对实际 ZIP 解压后的文件执行：Node 版本和平台、SQLite/FTS5、原生 kernel 合约与提取、首次索引和增量同步、文件监听、CLI 成功/失败退出码、stdio MCP initialize/tools-list/EOF 退出。执行前从同一解包产物复制准备含中文和空格的 Desktop 布局，避免在 Windows 上搬移刚执行过的运行时目录；随后使用独立启动器分别验证显式 PINABLE_HOME 和自动推导 home。缺 kernel、viewer/WASM、目标不全、混合源码或 smoke 哈希不符时禁止汇总发布。
 
 `collect` 等待完整 engine/UI 和原生 kernel 质量检查及六平台 smoke 全部通过；只有发布 job 获得 contents:write，使用当前工作流的 GitHub token。Rust stable、Go 1.26.x 和 runner 镜像会更新，清单记录实际工具链，不承诺不同工具链的字节完全一致。
 

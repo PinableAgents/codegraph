@@ -311,18 +311,18 @@ def verify_bundle(target: str) -> None:
         env = dict(os.environ, CODEGRAPH_TELEMETRY="0", DO_NOT_TRACK="1", CODEGRAPH_NO_DAEMON="1")
         for key in ("NODE_OPTIONS", "NODE_PATH", "CODEGRAPH_KERNEL", "CODEGRAPH_KERNEL_PATH", "CODEGRAPH_DIR", "PINABLE_HOME"):
             env.pop(key, None)
-        subprocess.run([str(node), "--liftoff-only", "--disable-warning=ExperimentalWarning",
-                        str(ROOT / "scripts/pinable/runtime/smoke.cjs"), str(bundle)],
-                       env=env, check=True, timeout=180)
-        # Exercise the downloaded launcher in Desktop's final installation layout.
+        # Windows may retain handles after execution; prepare both layouts first.
         home = temp / "Pinable home 含 空格"
         managed = home / "components/codegraph" / meta["componentVersion"]
         managed.parent.mkdir(parents=True)
-        bundle.rename(managed)
+        shutil.copytree(bundle, managed)
         standalone = home / "bin" / ("codegraph.exe" if target.startswith("win32-") else "codegraph")
         standalone.parent.mkdir()
         shutil.copy2(OUT / launcher_name(target), standalone)
         standalone.chmod(0o755)
+        subprocess.run([str(node), "--liftoff-only", "--disable-warning=ExperimentalWarning",
+                        str(ROOT / "scripts/pinable/runtime/smoke.cjs"), str(bundle)],
+                       env=env, check=True, timeout=180)
         for configured in (False, True):
             managed_env = dict(env)
             if configured:
