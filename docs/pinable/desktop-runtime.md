@@ -2,12 +2,14 @@
 
 ## 构建与发布
 
-独立工作流 `.github/workflows/pinable-desktop-runtime.yml` 在 main 提交和 PR 时提前构建、验证六个平台的组件。它生成完整运行时，不生成 Wails 安装包，也不发布上游 npm 包。
+独立工作流 `.github/workflows/pinable-desktop-runtime.yml` 在每次提交进入 main 后自动构建、验证六个平台的组件，并在全部质量检查通过后自动发布稳定 GitHub Release。PR 仅构建和验证，不发布。它生成完整运行时，不生成 Wails 安装包，也不发布上游 npm 包。
 
 在 GitHub Actions 的 **Pinable desktop runtimes** 中手动运行：
 
-- `publish=false`（默认）：全部质量检查和原生验证通过后，提供 `pinable-codegraph-all-platforms` artifact，保留 30 天。
-- `publish=true`：仅 main 可发布。创建稳定 GitHub Release，tag 为 `pinable-runtime-v<package-version>-<source-sha前12位>`，保持 `latest=false`，不改变上游 `v*` 发布。
+- 手动 `publish=false`（默认）：全部质量检查和原生验证通过后，提供 `pinable-codegraph-all-platforms` artifact，保留 30 天，不额外发布。这个选项不影响 main push 的自动发布。
+- 手动 `publish=true`：仅 main 可发布，使用与自动发布相同的质量门禁。
+
+自动和手动发布的 tag 均为 `pinable-runtime-v<package-version>-<source-sha前12位>`，不同源码不要求递增 npm 版本。发布请求设置 `make_latest=false`，不主动提升 Latest，不改变上游 `v*` 发布；仓库没有既有 Release 时，GitHub 仍可能将首个稳定版本作为默认 Latest 返回。Desktop 必须固定 tag 和哈希，不依赖 Latest。
 
 也可以使用 GitHub CLI：
 
@@ -15,7 +17,7 @@
 gh workflow run pinable-desktop-runtime.yml --repo PinableAgents/codegraph --ref main -f publish=true
 ```
 
-发布前重新验证完整产物集合、源码 SHA、每个目标的 smoke 证据与 SHA256SUMS。只有 main 仍指向该源码时才原子创建新 tag。随后创建 draft、上传资产、复核 tag 和 main、检查 GitHub 返回的每个资产的大小和 SHA256，最后转为稳定 Release。既有 tag、资产均不覆盖；上传失败或竞态保留 draft/已预留 tag，供维护者检查。已发布资产不要删改，应提交新的源码版本后再发布。
+发布脚本仅接受本仓库 main 的 push 或手动事件，待发布源码必须等于事件的 GITHUB_SHA。发布前重新验证完整产物集合、源码 SHA、每个目标的 smoke 证据与 SHA256SUMS。只有 main 仍指向该源码时才原子创建新 tag；main 已推进的旧任务停止发布，由新提交的流水线接续。随后创建 draft、上传资产、复核 tag 和 main、检查 GitHub 返回的每个资产的大小和 SHA256，最后转为稳定 Release。既有 tag、资产均不覆盖；上传失败或竞态保留 draft/已预留 tag，供维护者检查。已发布资产不要删改，应提交新的源码版本后再发布。
 
 ## 六平台产物
 
