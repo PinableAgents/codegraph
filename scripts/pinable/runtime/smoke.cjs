@@ -43,7 +43,7 @@ async function main() {
     await graph.sync();
     assert.ok(graph.getNodesByKind('function').some(node => node.name === 'desktopIncremental'));
     graph.close(); graph = null;
-    const launcher = path.join(bundle, meta.entrypoint);
+    const launcher = process.argv[3] || path.join(bundle, meta.entrypoint);
     const version = spawnSync(launcher, ['--version'], {cwd: project, env: process.env, encoding: 'utf8', timeout: 30000});
     assert.ifError(version.error);
     assert.equal(version.status, 0, version.stderr);

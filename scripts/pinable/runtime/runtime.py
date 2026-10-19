@@ -224,11 +224,16 @@ def pack_app() -> None:
 
 def launcher_name(target: str) -> str:
     goos, goarch = TARGETS[target]
-    return f"codegraph_{goos}_{goarch}" + (".exe" if goos == "windows" else "")
+    return f"codegraph-launcher_{goos}_{goarch}" + (".exe" if goos == "windows" else "")
+
+
+def archive_name(target: str) -> str:
+    goos, goarch = TARGETS[target]
+    return f"codegraph_{goos}_{goarch}.zip"
 
 
 def describe_file(path: Path) -> dict:
-    require(path.is_file() and path.stat().st_size > 0, f"missing/empty asset: {path}")
+    require(path.is_file() and not path.is_symlink() and path.stat().st_size > 0, f"missing/empty asset: {path}")
     return {"file": path.name, "sha256": sha256(path), "size": path.stat().st_size}
 
 
@@ -270,6 +275,7 @@ def build_bundle(target: str, kernel: Path, launcher: Path) -> None:
         if windows:
             (stage / "bin/codegraph.cmd").write_bytes(b'@"%~dp0codegraph.exe" %*\r\n')
         metadata = {"schemaVersion": 1, "component": "codegraph", "source": info,
+                    "contractVersion": "1", "componentVersion": info["version"],
                     "target": target, "goos": TARGETS[target][0], "goarch": TARGETS[target][1],
                     "entrypoint": entry, "nodeExecutable": "node.exe" if windows else "node",
                     "nodeArgs": ["--liftoff-only", "--disable-warning=ExperimentalWarning", "lib/dist/bin/codegraph.js"],
@@ -280,7 +286,7 @@ def build_bundle(target: str, kernel: Path, launcher: Path) -> None:
                     "signing": "no Pinable Developer ID, notarization or Authenticode signature applied"}
         (stage / "build.json").unlink()
         write_json(stage / "runtime.json", metadata)
-        archive = OUT / ("codegraph-" + target + (".zip" if windows else ".tar.gz"))
+        archive = OUT / archive_name(target)
         archive_tree(stage, archive, info["commitTime"])
         standalone = OUT / launcher_name(target)
         require(not standalone.exists(), f"refusing to overwrite launcher: {standalone}")
@@ -296,32 +302,43 @@ def verify_bundle(target: str) -> None:
     meta = read_json(OUT / f"codegraph-{target}.json")
     archive = OUT / meta["archive"]["file"]
     require(describe_file(archive) == meta["archive"], "archive changed before smoke test")
+    require(describe_file(OUT / launcher_name(target)) == meta["launcher"], "launcher changed before smoke test")
     with tempfile.TemporaryDirectory(prefix="Pinable runtime 空格 ") as temp:
         temp = Path(temp)
         unpack(archive, temp)
         bundle = temp / meta["archiveRoot"]
         node = bundle / meta["nodeExecutable"]
         env = dict(os.environ, CODEGRAPH_TELEMETRY="0", DO_NOT_TRACK="1", CODEGRAPH_NO_DAEMON="1")
-        for key in ("NODE_OPTIONS", "NODE_PATH", "CODEGRAPH_KERNEL", "CODEGRAPH_KERNEL_PATH", "CODEGRAPH_DIR"):
+        for key in ("NODE_OPTIONS", "NODE_PATH", "CODEGRAPH_KERNEL", "CODEGRAPH_KERNEL_PATH", "CODEGRAPH_DIR", "PINABLE_HOME"):
             env.pop(key, None)
         subprocess.run([str(node), "--liftoff-only", "--disable-warning=ExperimentalWarning",
                         str(ROOT / "scripts/pinable/runtime/smoke.cjs"), str(bundle)],
                        env=env, check=True, timeout=180)
-        # Also exercise the separately distributed launcher from the bundle root.
-        standalone = bundle / launcher_name(target)
-        shutil.copy2(OUT / standalone.name, standalone)
+        # Exercise the downloaded launcher in Desktop's final installation layout.
+        home = temp / "Pinable home 含 空格"
+        managed = home / "components/codegraph" / meta["componentVersion"]
+        managed.parent.mkdir(parents=True)
+        bundle.rename(managed)
+        standalone = home / "bin" / ("codegraph.exe" if target.startswith("win32-") else "codegraph")
+        standalone.parent.mkdir()
+        shutil.copy2(OUT / launcher_name(target), standalone)
         standalone.chmod(0o755)
-        result = subprocess.run([str(standalone), "--version"], cwd=temp, env=env,
-                                capture_output=True, text=True, check=True, timeout=30)
-        require(meta["source"]["version"] in result.stdout, "standalone launcher version mismatch")
+        for configured in (False, True):
+            managed_env = dict(env)
+            if configured:
+                managed_env["PINABLE_HOME"] = str(home)
+            subprocess.run([str(managed / meta["nodeExecutable"]), "--liftoff-only",
+                            "--disable-warning=ExperimentalWarning", str(ROOT / "scripts/pinable/runtime/smoke.cjs"),
+                            str(managed), str(standalone)], env=managed_env, check=True, timeout=180)
     write_json(OUT / f"codegraph-{target}.smoke.json", {
         "schemaVersion": 1, "ok": True, "target": target, "source": meta["source"],
+        "archive": meta["archive"], "launcher": meta["launcher"],
         "checks": ["binary-architecture", "bundled-node", "sqlite-fts5", "kernel-contract-and-extraction",
-                   "index-and-sync", "native-launcher-version", "standalone-launcher", "mcp-initialize-and-tools-list",
+                   "index-and-sync", "native-launcher-version", "standalone-launcher", "managed-home-layout", "mcp-initialize-and-tools-list",
                    "unicode-and-spaces-path", "native-file-watch-events", "viewer-and-wasm-assets"]})
 
 
-def aggregate(directory: Path) -> dict:
+def runtime_set(directory: Path, released: bool = False) -> dict:
     assets = []
     source = None
     expected = set()
@@ -334,21 +351,33 @@ def aggregate(directory: Path) -> dict:
         require(meta["source"] == source and smoke["source"] == source, "mixed source revisions or versions")
         require(smoke.get("ok") is True and smoke.get("target") == target, "native runtime smoke test missing/failed")
         require(meta["nativeKernel"]["required"] is True, "native kernel cannot be optional")
-        for kind, expected_name in (("archive", "codegraph-" + target + (".zip" if target.startswith("win32-") else ".tar.gz")),
+        require(meta["contractVersion"] == "1" and meta["componentVersion"] == source["version"], "invalid Desktop contract")
+        for kind, expected_name in (("archive", archive_name(target)),
                                     ("launcher", launcher_name(target))):
             require(meta[kind]["file"] == expected_name, "unsafe or unexpected artifact filename")
             require(describe_file(directory / expected_name) == meta[kind], "artifact hash/size mismatch")
             expected.add(expected_name)
+        require(smoke.get("archive") == meta["archive"] and smoke.get("launcher") == meta["launcher"],
+                "smoke evidence does not match artifact hashes")
         expected.update((record_name, smoke_name))
         assets.append(meta)
+    if released:
+        expected.update(("codegraph-runtime-manifest.json", "SHA256SUMS"))
     require(set(p.name for p in directory.iterdir()) == expected, "missing or unexpected artifact files")
     require(re.fullmatch(r"[0-9a-f]{40}", source["revision"]) is not None, "invalid source revision")
     require(source["repository"] == "PinableAgents/codegraph", "unexpected source repository")
+    require(re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?", source["version"]) is not None, "invalid version")
     require(source["nodeVersion"] == settings()["nodeVersion"], "Node version drift")
     require(source["releaseTag"] == "pinable-runtime-v" + source["version"] + "-" + source["revision"][:12], "invalid release tag")
     manifest = {"schemaVersion": 1, "component": "codegraph", "source": source, "assets": assets,
                 "consumerLock": "Maintainer-reviewed input for pinable-desktop/internal/assets/codegraph/component-lock.json; not a replacement schema"}
+    return manifest
+
+
+def aggregate(directory: Path) -> dict:
+    manifest = runtime_set(directory)
     write_json(directory / "codegraph-runtime-manifest.json", manifest)
+    expected = {p.name for p in directory.iterdir()}
     expected.add("codegraph-runtime-manifest.json")
     (directory / "SHA256SUMS").write_text("".join(f"{sha256(directory / name)}  {name}\n" for name in sorted(expected)), encoding="utf-8")
     return manifest
