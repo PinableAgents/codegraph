@@ -153,8 +153,9 @@ END;
 -- materialized on the node write path.
 -- Deletions leave orphan rows ON PURPOSE: rows are PROPOSALS, always
 -- re-verified against nodes before being surfaced (CodeGraph.getSegmentMatches),
--- and a full index clears the table at its start. Populated lazily on old
--- databases (empty until the next index/sync heals it).
+-- and a full index prunes them once it completes (a fresh one starts the table
+-- empty). Populated lazily on old databases (empty until the next index/sync
+-- heals it).
 CREATE TABLE IF NOT EXISTS name_segment_vocab (
     segment TEXT NOT NULL,
     name TEXT NOT NULL,
@@ -207,6 +208,11 @@ CREATE INDEX IF NOT EXISTS idx_unresolved_failed_import_name ON unresolved_refs(
 -- (`module:tag`) and looked up by its whole name as well. The leading status
 -- is the equality term that keeps the planner on this small index.
 CREATE INDEX IF NOT EXISTS idx_unresolved_failed_module_name ON unresolved_refs(status, reference_name) WHERE status = 'failed' AND name_tail GLOB 'module:*';
+-- A member reference through an import binding (`store.get`) is parked under
+-- its module too, and still looked up by its member: the tail its name gives,
+-- what follows its last dot. Spell the expression exactly as MEMBER_TAIL_SQL
+-- (reference-tail.ts) does, or SQLite will not use this index.
+CREATE INDEX IF NOT EXISTS idx_unresolved_failed_module_member ON unresolved_refs(status, substr(reference_name, length(rtrim(reference_name, replace(reference_name, '.', ''))) + 1)) WHERE status = 'failed' AND name_tail GLOB 'module:*';
 CREATE INDEX IF NOT EXISTS idx_edges_provenance ON edges(provenance);
 -- Sync's third-file wiring lookup must not scan every synthesized edge.
 -- CASE short-circuits malformed metadata; keep these expressions identical

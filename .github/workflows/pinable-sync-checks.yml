@@ -44,7 +44,7 @@ jobs:
       - run: npm run build:lib
       - name: Full engine and UI regression suite
         shell: bash
-        run: npm test -- --maxWorkers=2 --minWorkers=1 2>&1 | tee full-tests.log
+        run: npm test -- --maxWorkers=2 2>&1 | tee full-tests.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -76,7 +76,7 @@ jobs:
           npm test -- __tests__/kernel-tsjs-parity.test.ts
           __tests__/rust-self-owner.test.ts __tests__/awaited-receiver.test.ts
           __tests__/release-main-regressions.test.ts
-          --maxWorkers=2 --minWorkers=1 2>&1 | tee native-tests.log
+          --maxWorkers=2 2>&1 | tee native-tests.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:

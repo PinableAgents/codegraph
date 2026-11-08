@@ -5,13 +5,13 @@
  */
 
 import { SqliteDatabase } from './sqlite-adapter';
-import { referenceNameTail } from './reference-tail';
+import { referenceNameTail, MEMBER_TAIL_SQL, MODULE_PARKED_SQL } from './reference-tail';
 import { repairPinableSchema } from './pinable-schema';
 
 /**
  * Current schema version
  */
-export const CURRENT_SCHEMA_VERSION = 15;
+export const CURRENT_SCHEMA_VERSION = 16;
 
 /**
  * Migration definition
@@ -110,8 +110,9 @@ const migrations: Migration[] = [
       // DDL only — instant on any size database (the row-churn hazards of #1067
       // don't apply). The table starts EMPTY on migrated databases; `sync`
       // detects that over a populated graph and backfills batched+yielding
-      // (CodeGraph.rebuildNameSegmentVocab), and any full index rebuilds it
-      // from scratch. Keep the definition in lockstep with schema.sql.
+      // (CodeGraph.rebuildNameSegmentVocab), and a full index into a fresh
+      // database fills it from scratch. Keep the definition in lockstep with
+      // schema.sql.
       db.exec(`
         CREATE TABLE IF NOT EXISTS name_segment_vocab (
           segment TEXT NOT NULL,
@@ -300,6 +301,21 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 16,
+    description: 'Retry a failed member reference through an import binding by its member: module-tail member index',
+    up: (db) => {
+      // A failed member reference through an import binding (`store.get`) is
+      // parked under the module's key from this version on, and still looked
+      // up by its member, the tail its name gives. Rows parked before keep
+      // that tail, which the tail lookup already finds; a re-index parks
+      // them under their modules. Keep the definition in lockstep with
+      // schema.sql: the expression is MEMBER_TAIL_SQL.
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_unresolved_failed_module_member ON unresolved_refs(status, ${MEMBER_TAIL_SQL}) WHERE ${MODULE_PARKED_SQL};
+      `);
+    },
+  },
 ];
 
 /**
@@ -328,6 +344,16 @@ function recordMigration(db: SqliteDatabase, version: number, description: strin
 
 /**
  * Run all pending migrations
+ *
+ * Another process may be opening the same index right now and running them
+ * too (#2980), so `fromVersion`, read before, can be out of date by the time a
+ * migration runs. Each one runs in a transaction that takes the write lock up
+ * front, waiting out a process already migrating, and reads the version again
+ * there, skipping a migration that process has applied. Before, the second
+ * process applied it again and its open failed: recording the version broke
+ * the version's uniqueness, or a migration that reads first got SQLITE_BUSY.
+ * `fromVersion` stays a floor: a database built from schema.sql records only
+ * v1 and the current version, and a rewound one replays what is above it.
  */
 export function runMigrations(db: SqliteDatabase, fromVersion: number): void {
   // Fork repairs inspect schema features rather than consuming upstream version
@@ -352,9 +378,10 @@ export function runMigrations(db: SqliteDatabase, fromVersion: number): void {
   // Run each migration in a transaction
   for (const migration of pending) {
     db.transaction(() => {
+      if (Math.max(fromVersion, getCurrentVersion(db)) >= migration.version) return;
       migration.up(db);
       recordMigration(db, migration.version, migration.description);
-    })();
+    }, { immediate: true })();
   }
 }
 

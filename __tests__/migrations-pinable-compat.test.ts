@@ -75,7 +75,7 @@ describe('Pinable/upstream schema-version collision (#2060)', () => {
 
   function assertSchema(db: SqliteDatabase): void {
     expect(getCurrentVersion(db)).toBe(CURRENT_SCHEMA_VERSION);
-    expect(CURRENT_SCHEMA_VERSION).toBe(15);
+    expect(CURRENT_SCHEMA_VERSION).toBe(16);
     expect(getPendingMigrations(db)).toEqual([]);
     expect(() => db.prepare('SELECT file_path FROM synthesis_inputs').all()).not.toThrow();
     for (const [index, columns] of Object.entries({
