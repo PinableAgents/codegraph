@@ -8,7 +8,7 @@ import { CURRENT_SCHEMA_VERSION, getCurrentVersion, getMigrationHistory, runMigr
 const cursors = ['idx_edges_source_id', 'idx_edges_target_id', 'idx_nodes_file_id'];
 const retryIndexes = ['idx_unresolved_failed_import_tail', 'idx_unresolved_failed_import_name'];
 
-describe('Pinable v12 adoption of upstream v12-v15 without another version collision', () => {
+describe('Pinable v12 adoption of upstream v12-v16 without another version collision', () => {
   let dir: string | undefined;
   let connection: DatabaseConnection | undefined;
 
@@ -29,6 +29,7 @@ describe('Pinable v12 adoption of upstream v12-v15 without another version colli
     for (const name of cursors) db.exec(`DROP INDEX ${name}`);
     if (legacyImports) for (const name of retryIndexes) db.exec(`DROP INDEX ${name}`);
     if (version < 15) db.exec('DROP INDEX idx_unresolved_failed_module_name');
+    if (version < 16) db.exec('DROP INDEX idx_unresolved_failed_module_member');
     db.prepare('INSERT INTO project_metadata VALUES (?, ?, ?)').run('synthesis_pending', '0', 7);
     db.prepare("INSERT INTO files(path, content_hash, language, size, modified_at, indexed_at) VALUES ('a.dart', 'hash', 'dart', 10, 0, 0)").run();
     db.prepare(`INSERT INTO nodes(id, kind, name, qualified_name, file_path, language,
@@ -51,14 +52,14 @@ describe('Pinable v12 adoption of upstream v12-v15 without another version colli
   const tails = () => connection!.getDb().prepare('SELECT reference_name, status, name_tail FROM unresolved_refs ORDER BY id').all();
   const hasIndex = (name: string) => !!connection!.getDb().prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?").get(name);
 
-  it('repairs legacy v12 imports, applies v13-v15, and preserves the occupied v12 history', () => {
+  it('repairs legacy v12 imports, applies v13-v16, and preserves the occupied v12 history', () => {
     const dbPath = fixture();
     connection!.close();
     connection = DatabaseConnection.open(dbPath);
     expect(getCurrentVersion(connection.getDb())).toBe(CURRENT_SCHEMA_VERSION);
-    expect(getMigrationHistory(connection.getDb()).map(row => row.version)).toEqual([12, 13, 14, 15]);
+    expect(getMigrationHistory(connection.getDb()).map(row => row.version)).toEqual([12, 13, 14, 15, 16]);
     expect(getMigrationHistory(connection.getDb())[0]).toEqual({version: 12, appliedAt: 123, description: 'original history, do not replace'});
-    for (const name of [...cursors, ...retryIndexes, 'idx_unresolved_failed_module_name']) expect(hasIndex(name)).toBe(true);
+    for (const name of [...cursors, ...retryIndexes, 'idx_unresolved_failed_module_name', 'idx_unresolved_failed_module_member']) expect(hasIndex(name)).toBe(true);
     expect(tails().map(row => row.name_tail)).toEqual(['b', 'h', 'dart', 'price.liquid', 'module:Team', 'map']);
     expect(connection.getDb().prepare('SELECT COUNT(*) AS n FROM nodes').get().n).toBe(1);
     expect(connection.getDb().prepare('SELECT COUNT(*) AS n FROM unresolved_refs').get().n).toBe(6);
@@ -76,7 +77,7 @@ describe('Pinable v12 adoption of upstream v12-v15 without another version colli
   });
 
   it('adds cursor indexes even when the upstream version is already current', () => {
-    const dbPath = fixture(15, false);
+    const dbPath = fixture(CURRENT_SCHEMA_VERSION, false);
     const history = getMigrationHistory(connection!.getDb());
     const rows = tails();
     connection!.close();
@@ -87,16 +88,16 @@ describe('Pinable v12 adoption of upstream v12-v15 without another version colli
   });
 
   it.each(retryIndexes)('repairs when just %s is missing', missing => {
-    fixture(15, false);
+    fixture(CURRENT_SCHEMA_VERSION, false);
     connection!.getDb().exec(`DROP INDEX ${missing}`);
     connection!.getDb().prepare('UPDATE unresolved_refs SET name_tail = ? WHERE reference_name = ?').run('dart', 'package:app/b.dart');
-    runMigrations(connection!.getDb(), 15);
+    runMigrations(connection!.getDb(), CURRENT_SCHEMA_VERSION);
     for (const name of retryIndexes) expect(hasIndex(name)).toBe(true);
     expect(tails()[0].name_tail).toBe('b');
     expect(getMigrationHistory(connection!.getDb())).toHaveLength(1);
   });
 
-  it.each([12, 15])('does not repair or change history through a read-only v%s connection', version => {
+  it.each([12, 15, CURRENT_SCHEMA_VERSION])('does not repair or change history through a read-only v%s connection', version => {
     const dbPath = fixture(version, version === 12);
     const before = tails();
     const history = getMigrationHistory(connection!.getDb());
@@ -126,7 +127,7 @@ describe('Pinable v12 adoption of upstream v12-v15 without another version colli
     for (const name of [...cursors, ...retryIndexes]) expect(hasIndex(name)).toBe(false);
     db.exec('DROP TRIGGER reject_import_rewrite');
     runMigrations(db, 12);
-    expect(getCurrentVersion(db)).toBe(15);
+    expect(getCurrentVersion(db)).toBe(CURRENT_SCHEMA_VERSION);
     expect(tails()[0].name_tail).toBe('b');
   });
 

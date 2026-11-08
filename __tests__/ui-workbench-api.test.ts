@@ -33,7 +33,11 @@ describe('工作台API边界',()=>{
     for(const file of ['src/a/a.ts','src/b/b.ts']) { q.upsertFile({path:file,language:'typescript',contentHash:'x',size:1,modifiedAt:1,indexedAt:1,nodeCount:1});q.insertNodes([{...n(file),filePath:file}]); }
     q.insertEdges([{source:'src/a/a.ts',target:'src/b/b.ts',kind:'calls'},{source:'src/b/b.ts',target:'src/a/a.ts',kind:'calls'}]);
     const result=buildMap(cg,root,new URLSearchParams('root=src&bounded=1&details=1'));
-    expect(result.cycles.total).toBe(1);expect(result.detailsDeferred).toBe(false);
+    expect(result.cycles.total).toBe(0);expect(result.detailsDeferred).toBe(false);
+    q.insertEdges([{source:'src/a/a.ts',target:'src/b/b.ts',kind:'imports'},{source:'src/b/b.ts',target:'src/a/a.ts',kind:'imports'}]);
+    const imports=buildMap(cg,root,new URLSearchParams('root=src&bounded=1&details=1'));
+    const unbounded=buildMap(cg,root,new URLSearchParams('root=src'));
+    expect(imports.cycles.total).toBe(1);expect(imports.cycles).toEqual(unbounded.cycles);
     for(let i=0;i<405;i++) q.upsertFile({path:`src/test${i}/unit.test.ts`,language:'typescript',contentHash:'x',size:1,modifiedAt:1,indexedAt:1,nodeCount:1});
     const filtered=buildMap(cg,root,new URLSearchParams('root=src&bounded=1&tests=0&minWeight=3'));
     expect(filtered.budget?.exceeded).toBe(false);expect(filtered.modules).toHaveLength(2);expect(filtered.links).toHaveLength(0);

@@ -62,3 +62,24 @@ it('目录和文件分页包含非BMP路径并排除相邻前缀', () => {
   expect(q.getUiBrowsePage('src', 'directories', '', 1).map(row => row.path)).toEqual(['src/😀dir']);
   expect(q.getUiBrowsePage('😀root', 'directories', '', 20).map(row => row.path)).toEqual(['😀root/子目录']);
 });
+
+
+it('bounds import-only cycle pairs without changing dependency pairs', () => {
+  const files = ['src/a.ts', 'src/b.ts', 'src/c.ts'];
+  q.insertNodes([...files.map(file => node(file, file)), node('outside', 'other/a.ts')]);
+  q.insertEdges([
+    { source: files[0]!, target: files[1]!, kind: 'calls' },
+    { source: files[1]!, target: files[0]!, kind: 'references' },
+    { source: files[0]!, target: files[2]!, kind: 'imports', metadata: { confidence: 0.1 } },
+    { source: files[2]!, target: files[0]!, kind: 'imports' },
+    { source: files[2]!, target: 'outside', kind: 'imports' },
+    { source: files[0]!, target: files[0]!, kind: 'imports' },
+  ]);
+  expect(q.getUiFileImportPairs(files)).toEqual(expect.arrayContaining([
+    { source: files[0], target: files[2] }, { source: files[2], target: files[0] },
+  ]));
+  expect(q.getUiFileImportPairs(files)).toHaveLength(2);
+  expect(q.getUiFileImportPairs(files, 1)).toHaveLength(1);
+  expect(q.getUiFileImportPairs([])).toEqual([]);
+  expect(q.getUiFileDependencyPairs(files, 0)).toHaveLength(4);
+});
