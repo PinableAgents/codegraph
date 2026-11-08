@@ -91,7 +91,7 @@ jobs:
             triple: x86_64-apple-darwin
             library: libcodegraph_kernel.dylib
           - target: darwin-arm64
-            runner: macos-14
+            runner: macos-15
             goos: darwin
             goarch: arm64
             triple: aarch64-apple-darwin
@@ -227,3 +227,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python scripts/pinable/runtime/publish.py --directory artifacts --expected-commit "$GITHUB_SHA"
+
