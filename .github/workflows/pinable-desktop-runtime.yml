@@ -1,16 +1,8 @@
 name: Pinable desktop runtimes
 
 on:
-  pull_request:
-    branches: [main]
   push:
     branches: [main]
-  workflow_dispatch:
-    inputs:
-      publish:
-        description: 'Publish this manual main build; main pushes already publish automatically'
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -29,7 +21,7 @@ jobs:
   quality:
     uses: ./.github/workflows/pinable-sync-checks.yml
     with:
-      source_ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      source_ref: ${{ github.sha }}
 
   prepare:
     runs-on: ubuntu-22.04
@@ -37,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@v6
         with:
@@ -115,7 +107,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@v6
         with:
@@ -166,7 +158,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@v6
         with:
@@ -206,7 +198,7 @@ jobs:
     needs: collect
     if: >-
       github.repository == 'PinableAgents/codegraph' && github.ref == 'refs/heads/main' &&
-      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
+      github.event_name == 'push'
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     permissions:
@@ -227,4 +219,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python scripts/pinable/runtime/publish.py --directory artifacts --expected-commit "$GITHUB_SHA"
+
 

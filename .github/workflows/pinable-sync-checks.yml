@@ -6,10 +6,6 @@ on:
       source_ref:
         type: string
         default: ''
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
 
 permissions:
   contents: read
@@ -83,3 +79,4 @@ jobs:
           name: pinable-native-test-log
           path: native-tests.log
           if-no-files-found: ignore
+
