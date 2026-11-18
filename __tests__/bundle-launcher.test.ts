@@ -126,15 +126,19 @@ describe('bundled launchers (#1278)', () => {
 
 describe('bundled Node runtime (#2617)', () => {
   it('ships a Node 24 release with the fix for the Windows abort at exit', () => {
-    // The release workflow passes only the target, so the recipe's default
-    // version is the Node every release bundles.
-    const workflow = fs.readFileSync(path.resolve('.github/workflows/release.yml'), 'utf8');
-    const calls = workflow.match(/build-bundle\.sh[^\r\n]*/g) ?? [];
-    expect(calls.length).toBeGreaterThan(0);
-    for (const call of calls) expect(call.trim()).toBe('build-bundle.sh "$t"');
+    // Pinable publishes through runtime.py, not the upstream build-bundle.sh
+    // recipe. Guard the configured runtime and the active publishing path.
+    const config = JSON.parse(fs.readFileSync(path.resolve('.pinable/runtime.json'), 'utf8'));
+    const workflow = fs.readFileSync(path.resolve('.github/workflows/pinable-desktop-runtime.yml'), 'utf8');
+    expect(workflow).toContain('python scripts/pinable/runtime/runtime.py bundle');
+    expect(workflow).toContain('python scripts/pinable/runtime/runtime.py verify --target');
+    for (const target of ['win32-x64', 'win32-arm64']) {
+      expect(config.targets).toContain(target);
+      expect(workflow).toContain(`target: ${target}`);
+    }
 
-    const pin = /^NODE_VERSION="\$\{2:-v(\d+)\.(\d+)\.(\d+)\}"\r?$/m.exec(recipe);
-    expect(pin, 'default NODE_VERSION in scripts/build-bundle.sh').not.toBeNull();
+    const pin = /^v(\d+)\.(\d+)\.(\d+)$/.exec(config.nodeVersion);
+    expect(pin, 'nodeVersion in .pinable/runtime.json').not.toBeNull();
     const [major, minor] = pin!.slice(1, 3).map(Number);
     // The CLI refuses to run on Node 25 and later.
     expect(major).toBe(24);
