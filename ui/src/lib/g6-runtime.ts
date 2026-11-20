@@ -38,6 +38,15 @@ interface RuntimeEvents {
 }
 interface HtmlMount { element: HTMLElement; instance: Record<string, any>; props: Record<string, any>; component: unknown }
 
+// Stable, low-opacity accents distinguish directory/page groups without
+// making color the only signal: each group still has its own boundary and label.
+const GROUP_ACCENTS = ['#4f8dbc', '#53947b', '#a76c98', '#9c8250', '#7778b7', '#a56a59'];
+function groupAccent(kind: GraphScene['kind'], id: string): string | undefined {
+  if ((kind !== 'map' && kind !== 'screens') || !/^(directory|page):/.test(id)) return;
+  const hash = Array.from(id).reduce((value, char) => (Math.imul(value, 31) + char.charCodeAt(0)) >>> 0, 0);
+  return GROUP_ACCENTS[hash % GROUP_ACCENTS.length];
+}
+
 export class G6Runtime implements GraphController {
   private graph: Graph;
   private scene: GraphScene = { kind: 'map', nodes: [], edges: [], relations: [], groups: [] };
@@ -60,6 +69,7 @@ export class G6Runtime implements GraphController {
   private highlighted = new Set<string>();
   private states = new Map<string, string>();
   private edgeLabels = new Map<string,string>();
+  private edgeVisibility = new Map<string, boolean>();
   private observer: ResizeObserver;
   private themeObserver: MutationObserver;
   private media = matchMedia('(prefers-color-scheme: dark)');
@@ -72,7 +82,7 @@ export class G6Runtime implements GraphController {
     if (previous !== JSON.stringify(this.colors)) {
       const options=this.graph.getOptions();
       this.graph.setNode({...options.node,state:{selected:{stroke:this.colors.accent,lineWidth:2.5,halo:true,haloLineWidth:6,haloStroke:this.colors.accent,haloOpacity:.2},active:{stroke:this.colors.accent,lineWidth:2.5},dimmed:{opacity:.25}}});
-      this.graph.setEdge({...options.edge,state:{active:{stroke:this.colors.accent,lineWidth:2.5,opacity:1,label:true},dimmed:{opacity:.12}}});
+      this.graph.setEdge({...options.edge,state:{active:{stroke:this.colors.accent,lineWidth:2.5,opacity:1,label:true},pointed:{stroke:this.colors.accent,lineWidth:3.5,opacity:1,label:true},dimmed:{opacity:.12}}});
       this.geometry = ''; void this.update(this.scene, this.collapsed, this.highlighted);
     }
   };
@@ -84,7 +94,7 @@ export class G6Runtime implements GraphController {
       node: { type: datum => datum.data?.html ? 'html' : 'rect',
         state: { selected: { stroke: this.colors.accent, lineWidth: 2.5,halo:true,haloLineWidth:6,haloStroke:this.colors.accent,haloOpacity:.2 }, active: { stroke: this.colors.accent, lineWidth: 2.5 }, dimmed: { opacity: .25 } } },
       edge: { type: datum => datum.data?.semantic ? 'codegraph-semantic' : 'codegraph-routed',
-        state: { active: { stroke: this.colors.accent, lineWidth: 2.5, opacity: 1, label: true }, dimmed: { opacity: .12 } } },
+        state: { active: { stroke: this.colors.accent, lineWidth: 2.5, opacity: 1, label: true }, pointed: { stroke: this.colors.accent, lineWidth: 3.5, opacity: 1, label: true }, dimmed: { opacity: .12 } } },
       combo: { type: 'rect', style: { padding: [32, 20, 20, 20], radius: 6, collapsedSize: [200, 48], labelPlacement: 'top', collapsedMarker: false } },
       behaviors: ['drag-canvas', 'zoom-canvas', { type: 'drag-element', animation: false, shadow: true,
         enable: (event: any) => !!this.scene.nodes.find(n => n.id === event.target.id)?.draggable,
@@ -100,6 +110,7 @@ export class G6Runtime implements GraphController {
     this.graph.on('node:pointerleave', () => { this.hoveredNode = null; this.enqueueStates(); });
     this.graph.on('edge:pointermove', (event: any) => {
       const id = String(event.target.id), edge = this.scene.edges.find(e => e.id === id);
+      if (!edge || edge.hidden) return;
       if (this.hovered !== id) { this.hovered = id; this.enqueueStates(); }
       const native = event.nativeEvent ?? event.originalEvent;
       if (edge?.onHover && native) edge.onHover(native);
@@ -127,16 +138,21 @@ export class G6Runtime implements GraphController {
   async update(scene: GraphScene, collapsed: ReadonlySet<string>, highlighted: ReadonlySet<string>): Promise<void> {
     this.cancelRoutes?.();
     const generation = ++this.generation;
+    if (this.hovered && !scene.edges.some(e => e.id === this.hovered && !e.hidden)) {
+      this.scene.edges.find(e => e.id === this.hovered)?.onHover?.(null);
+      this.hovered = null;
+    }
     this.scene = scene; this.collapsed = new Set(collapsed); this.highlighted = new Set(highlighted);
     const geometry = JSON.stringify([scene.nodes.map(n => [n.id, n.x, n.y, n.width, n.height, n.label, n.sub, n.group, n.dashed,n.cyclic]),
       scene.edges.map(e => [e.id, e.source, e.target, e.path, e.points, e.reverseCount,e.straight]), scene.groups, [...collapsed]]);
     return this.enqueue(async () => {
       if (generation !== this.generation) return;
       if (geometry !== this.geometry) {
-        const started = performance.now(); this.paths.clear(); this.labelPoints.clear(); this.states.clear(); this.edgeLabels.clear();
+        const started = performance.now(); this.paths.clear(); this.labelPoints.clear(); this.states.clear(); this.edgeLabels.clear(); this.edgeVisibility.clear();
         const ids = new Set(scene.nodes.map(n => n.id));
         for (const [id, entry] of this.mounts) if (!ids.has(id)) { void unmount(entry.instance); this.mounts.delete(id); }
         const data = this.data(scene);
+        for (const edge of scene.edges) this.edgeVisibility.set(edge.id, edge.hidden === true);
         this.graph.setData(data);
         await this.graph.render();
         if (this.closed) return;
@@ -157,7 +173,7 @@ export class G6Runtime implements GraphController {
         }
       }
       this.updateHtml(scene);
-      await this.applyStates(); this.animate(scene.edges.some(e => e.flowing));
+      await this.applyStates(); this.animate(scene.edges.some(e => e.flowing && !e.hidden));
       this.displayedScene=scene;this.events.error('');
     });
   }
@@ -200,6 +216,7 @@ export class G6Runtime implements GraphController {
     } }));
     const edges: EdgeData[] = scene.edges.map(e => ({ id: e.id, source: e.source, target: e.target, data: { semantic: !!e.path }, style: {
       stroke: this.colors.edge, lineWidth: e.width, opacity: .65,
+      visibility: e.hidden ? 'hidden' : 'visible',
       label: !!e.alwaysLabel, labelText: e.label, labelFill: this.colors.sub, labelFontSize: 11, labelLineHeight: 13,
       labelBackground: true, labelBackgroundFill: this.colors.paper, labelAutoRotate:false,
       lineDash: e.dashPattern ?? (e.dashed ? [5, 3] : []), endArrow: e.arrow !== false, startArrow: !!e.reverseCount,
@@ -210,26 +227,32 @@ export class G6Runtime implements GraphController {
       capturePath: (path: any[]) => this.paths.set(e.id, path.map(command => command.join(' ')).join(' ')),
       captureLabel: (style:any) => {const t=style.transform?.find((p:any[])=>p[0]==='translate');this.labelPoints.set(e.id,{x:t?.[1]??style.x??0,y:t?.[2]??style.y??0});},
     } }));
-    return { nodes, edges, combos: scene.groups.map(g => ({ id: g.id, data: {}, style: {
-      collapsed: this.collapsed.has(g.id), labelText: `${g.label} · ${g.members.length}`, labelFill: this.colors.sub,
-      padding: this.collapsed.has(g.id) ? 0 : [32,20,20,20], labelPlacement: this.collapsed.has(g.id) ? 'center' : 'top',
-      fill: this.colors.group, fillOpacity: .35, stroke: this.colors.line, lineDash: [3, 3],
-    } })) };
+    return { nodes, edges, combos: scene.groups.map(g => {
+      const accent = groupAccent(scene.kind, g.id);
+      return { id: g.id, data: {}, style: {
+        collapsed: this.collapsed.has(g.id), labelText: `${g.label} · ${g.members.length}`, labelFill: this.colors.sub,
+        padding: this.collapsed.has(g.id) ? 0 : [32,20,20,20], labelPlacement: this.collapsed.has(g.id) ? 'center' : 'top',
+        fill: accent ?? this.colors.group, fillOpacity: accent ? .18 : .35, stroke: this.colors.line, lineDash: [3, 3],
+      } };
+    }) };
   }
   private async applyStates() {
     const changes: Record<string, string[]> = {};
     const labels:Partial<EdgeData>[]=[];
+    const visibility:Partial<EdgeData>[]=[];
+    const pinned = (this.scene.kind === 'map' || this.scene.kind === 'screens') && this.scene.nodes.some(n => n.selected);
     const relatedNodes = new Set<string>();
     const relatedEdges = new Set<string>();
     if (this.hoveredNode) relatedNodes.add(this.hoveredNode);
     for (const edge of this.scene.edges) {
+      if (edge.hidden) continue;
       if (edge.id === this.hovered || (this.hoveredNode && (edge.source === this.hoveredNode || edge.target === this.hoveredNode))) {
         relatedEdges.add(edge.id); relatedNodes.add(edge.source); relatedNodes.add(edge.target);
       }
     }
-    const hovering = relatedNodes.size > 0;
+    const hovering = !pinned && relatedNodes.size > 0;
     for (const n of this.scene.nodes) {
-      const next = n.selected ? ['selected'] : this.highlighted.has(n.id) || relatedNodes.has(n.id) ? ['active'] : n.dimmed || (hovering && !n.decorative) ? ['dimmed'] : [];
+      const next = n.selected ? ['selected'] : this.highlighted.has(n.id) || (hovering && relatedNodes.has(n.id)) ? ['active'] : n.dimmed || (hovering && !n.decorative) ? ['dimmed'] : [];
       if (this.states.get(n.id) !== next.join()) { this.states.set(n.id, next.join()); changes[n.id] = next; }
       const html = this.mounts.get(n.id)?.element;
       if (html) {
@@ -241,11 +264,21 @@ export class G6Runtime implements GraphController {
     for (const e of this.scene.edges) {
       const labelKey=JSON.stringify([e.label,e.alwaysLabel,e.dashed,e.dashPattern]);
       if(this.edgeLabels.get(e.id)!==labelKey){this.edgeLabels.set(e.id,labelKey);labels.push({id:e.id,style:{labelText:e.label,label:!!e.alwaysLabel,lineDash:e.dashPattern??(e.dashed?[5,3]:[])}});}
-      const active = e.hot || relatedEdges.has(e.id) || e.originalIds.some(id => this.highlighted.has(id));
-      const next = active ? ['active'] : e.dimmed || hovering ? ['dimmed'] : [];
+      const hidden = e.hidden === true;
+      if (this.edgeVisibility.get(e.id) !== hidden) {
+        // A hidden shape cannot intercept pointer events like an opacity-zero edge.
+        if (hidden || this.edgeVisibility.has(e.id)) visibility.push({ id: e.id, style: { visibility: hidden ? 'hidden' : 'visible' } });
+        this.edgeVisibility.set(e.id, hidden);
+      }
+      const active = !hidden && (e.hot || (hovering && relatedEdges.has(e.id)) || e.originalIds.some(id => this.highlighted.has(id)));
+      const pointed = pinned && e.hot && (e.pointed || e.id === this.hovered);
+      const next = active ? [pointed ? 'pointed' : 'active'] : e.dimmed || hovering ? ['dimmed'] : [];
       if (this.states.get(e.id) !== next.join()) { this.states.set(e.id, next.join()); changes[e.id] = next; }
     }
-    if(labels.length){this.graph.updateEdgeData(labels);await this.graph.draw();}
+    if(labels.length) this.graph.updateEdgeData(labels);
+    if(visibility.length) this.graph.updateEdgeData(visibility);
+    if(labels.length || visibility.length) await this.graph.draw();
+    this.container.dataset.graphEdges = String(this.scene.edges.filter(e => !e.hidden).length);
     if (Object.keys(changes).length) await this.graph.setElementState(changes, false);
   }
   private enqueueStates() { void this.enqueue(() => this.applyStates()); }
@@ -259,7 +292,7 @@ export class G6Runtime implements GraphController {
     if (playing) this.timer = setInterval(() => {
       if (this.closed || this.motion.matches) { this.animate(false); return; }
       this.dashOffset -= 2;
-      this.graph.updateEdgeData(this.displayedScene.edges.filter(e => e.flowing).slice(0, 200).map(e => ({ id: e.id, style: { lineDash: [2, 10], lineDashOffset: this.dashOffset } })));
+      this.graph.updateEdgeData(this.displayedScene.edges.filter(e => e.flowing && !e.hidden).slice(0, 200).map(e => ({ id: e.id, style: { lineDash: [2, 10], lineDashOffset: this.dashOffset } })));
       void this.enqueue(() => this.graph.draw());
     }, 100);
     else {
@@ -285,10 +318,10 @@ export class G6Runtime implements GraphController {
       nodes.push({ id: group.id, x: x - 100, y: y - 24, width: 200, height: 48, label: group.label, sub: `${group.members.length}`, kind: 'group' });
     }
     const boundsOf=(id:string)=>{const b=this.graph.getElementRenderBounds(id);return {x:b.min[0],y:b.min[1],width:b.max[0]-b.min[0],height:b.max[1]-b.min[1]};};
-    const boxes=[...nodes.map(n=>boundsOf(n.id)),...scene.edges.map(e=>boundsOf(e.id)),...scene.groups.map(g=>boundsOf(g.id))];
+    const boxes=[...nodes.map(n=>boundsOf(n.id)),...scene.edges.filter(e=>!e.hidden).map(e=>boundsOf(e.id)),...scene.groups.map(g=>boundsOf(g.id))];
     const x=Math.min(0,...boxes.map(b=>b.x)),y=Math.min(0,...boxes.map(b=>b.y));
     return { nodes, bounds:{x,y,width:Math.max(0,...boxes.map(b=>b.x+b.width))-x,height:Math.max(0,...boxes.map(b=>b.y+b.height))-y},
-      groups: scene.groups.filter(g=>!this.collapsed.has(g.id)).map(g=>({...g,bounds:boundsOf(g.id)})), edges: scene.edges.map(e => ({ ...e, labelPoint:this.labelPoints.get(e.id),hot: e.hot || this.hovered === e.id || e.originalIds.some(id => this.highlighted.has(id)), path: this.paths.get(e.id) ?? e.path })) };
+      groups: scene.groups.filter(g=>!this.collapsed.has(g.id)).map(g=>({...g,bounds:boundsOf(g.id)})), edges: scene.edges.filter(e=>!e.hidden).map(e => ({ ...e, labelPoint:this.labelPoints.get(e.id),hot: e.hot || this.hovered === e.id || e.originalIds.some(id => this.highlighted.has(id)), path: this.paths.get(e.id) ?? e.path })) };
   }
   exportSvg(scale: number) { return snapshotSvg(this.snapshot(), scale); }
   destroy() {

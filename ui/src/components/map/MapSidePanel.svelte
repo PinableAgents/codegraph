@@ -27,6 +27,7 @@
     payload: WireMapPayload;
     layout: MapLayout;
     selected: string | null;
+    direction?: 'in' | 'out' | 'both';
     includeTests: boolean;
     detailsRequested?: boolean;
     detailsLoading?: boolean;
@@ -50,6 +51,7 @@
     onLoadDetails,
     layout,
     selected,
+    direction = 'both',
     files,
     onSelect,
     onSelectRoot,
@@ -69,7 +71,7 @@
     selected === null
       ? []
       : layout.edges
-          .filter((e) => e.source === selected)
+          .filter((e) => !e.thin && e.source === selected)
           .map((e) => e.link)
           .sort((a, b) => b.count - a.count || a.target.localeCompare(b.target))
   );
@@ -77,7 +79,7 @@
     selected === null
       ? []
       : layout.edges
-          .filter((e) => e.target === selected)
+          .filter((e) => !e.thin && e.target === selected)
           .map((e) => e.link)
           .sort((a, b) => b.count - a.count || a.source.localeCompare(b.source))
   );
@@ -181,6 +183,7 @@
   {/if}
 
   {#if selectedModule}
+    {#if direction !== 'both'}<p class="dim">{graphText('列表按所选方向筛选，双向依赖仍保留两个箭头。', 'The list follows your direction filter; mutual dependencies retain both arrowheads.')}</p>{/if}
     <div class="edgeinfo">
       <div class="head">
         <b class="mono">{selectedModule.id}</b>
@@ -205,8 +208,8 @@
         </p>
       {/if}
 
-      {@render linkList('depends on', dependencies, 'target')}
-      {@render linkList('depended on by', dependents, 'source')}
+      {#if direction !== 'in'}{@render linkList(graphText('下游依赖', 'Depends on'), dependencies, 'target')}{/if}
+      {#if direction !== 'out'}{@render linkList(graphText('上游依赖', 'Depended on by'), dependents, 'source')}{/if}
 
       {#if target?.kind === 'file'}
         <a class="filerow" href={fileHref(target.path)}>{target.path}</a>
@@ -239,9 +242,11 @@
   <div class="pair label">{label}</div>
   {#if links.length > 0}
     <VirtualList items={links}>{#snippet row(link)}
-      <div class="pair">
-        <b>{side === 'target' ? link.target : link.source}</b>
+      {@const peer = side === 'target' ? link.target : link.source}
+      <div class="pair relationship-row">
+        <button class="peer mono" onclick={() => onSelect(peer)} title={peer}>{peer}</button>
         <span>{link.count}</span>
+        {#if link.byKind.length}<small>{link.byKind.map(k => `${k.kind} ${k.count}`).join(' · ')}</small>{/if}
       </div>
     {/snippet}</VirtualList>
   {:else}
@@ -250,6 +255,8 @@
 {/snippet}
 
 <style>
+  .peer{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;background:none;border:0;color:var(--ink);padding:3px 0;cursor:pointer;font:inherit}
+  .peer:hover{text-decoration:underline}.pair.relationship-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:0 6px}.pair small{grid-column:1/-1;color:var(--ink-2);font:11px var(--sans)}
   .load-details{min-height:36px;padding:4px 10px;border:1px solid var(--rule);background:var(--paper);color:var(--ink);font:14px var(--sans)}
   .mapside {
     border-left: 1px solid var(--route-branch);
@@ -336,10 +343,6 @@
     display: flex;
     justify-content: space-between;
     gap: 10px;
-  }
-  .pair b {
-    color: var(--ink);
-    font-weight: 500;
   }
   .pair.label {
     font: 400 11.5px var(--sans);

@@ -100,7 +100,6 @@
   });
 
   const selectedTarget = $derived.by(() => { const module = selected ? index?.nodeById.get(selected)?.module : null; return module ? moduleTarget(module) : null; });
-  let locate = $state<{ id: string } | null>(null);
   let layout = $state<MapLayout | null>(null);
   let positions = $state<Record<string, { x: number; y: number }>>({});
   let flowPlaying = $state(false);
@@ -158,8 +157,7 @@
 
   const visibleEdges = $derived.by(() => {
     if (!index) return [];
-    const candidates = layout?.edges.filter(edge => !edge.thin) ?? [];
-    return candidates;
+    return layout?.edges.filter(edge => !edge.thin) ?? [];
   });
   // 鼠标在同一条边内移动只更新提示位置，不使画布对象失效。
   const hoveredEdgeId = $derived(hovered?.edge.id ?? null);
@@ -299,7 +297,7 @@
         </p>
       </div>
     {:else if layout !== null}
-      <GraphCanvas scene={canvasScene} onVisibleChange={counts=>visibleCounts=counts} {selected} {locate} {fitRequest} bind:controller={graphController} bind:direction={focusDirection} bind:focusOnly bind:layoutMode={relationshipLayout}
+      <GraphCanvas scene={canvasScene} onVisibleChange={counts=>visibleCounts=counts} {selected} {fitRequest} bind:controller={graphController} bind:direction={focusDirection} bind:focusOnly bind:layoutMode={relationshipLayout}
         onReset={()=>{compactRequest=null;positions={};}}
         onSelect={id => { selected = id; hovered = null; }}
         onMove={(id, x, y) => { compactRequest = null; positions = { ...positions, [id]: { x, y } }; }} />
@@ -343,7 +341,8 @@
       exportName={exportFilename('map', payload.root ?? '')}
       onToggleTests={setTests}
       onSelectRoot={setRoot}
-      onSelect={(id) => { selected = id; if (id) locate = { id }; }}
+      direction={focusDirection}
+      onSelect={(id) => { selected = id; hovered = null; }}
     /></DetailPanel>
   {/if}
 </div>

@@ -317,6 +317,8 @@ and `map-model.ts`, tested without a browser in
 
 All four canvases now use exact `@antv/g6@5.1.1` and `@antv/layout@2.0.0`. The historical geometry helpers described above remain public for compatibility; live rendering uses `GraphScene` / `GraphController`, native Canvas nodes, and Svelte HTML cards for Flow. Selection and hover update styles without relayout. Current Map/Flow exports capture rendered paths and code, not the legacy SVG layout.
 
+Map and Screens start with a calmer view: redundant single-evidence module links or inferred screen transitions may be hidden, while strong/direct links and each node's available incoming and outgoing directions remain represented. **Show all relationships in scope** restores the hidden lines, not relationships excluded by explicit scope or weight filters. Selecting a node keeps its requested incoming/outgoing one-hop links visible and highlights them without rearranging nodes. Path analysis still uses the full loaded scope and reveals its hidden links; exports capture the visible presentation. The details panel keeps original endpoints and the available evidence; Map module counts do not imply a source location. Flow and Steps retain their original execution order and presentation.
+
 See [architecture and verification](../docs/design/g6-graph-workbench.md) for layouts, shared obstacle routing, grouping, directed BFS and budgets. To inspect fixtures locally, run `npm run dev -w ui` and open `/g6-verify.html?view=map` (also flow/screens/steps), or `/g6-verify.html?nodes=400`. These verification entries are excluded from production builds.
 
 ## Where the graph stops

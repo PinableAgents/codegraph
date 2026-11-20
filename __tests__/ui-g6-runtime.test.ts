@@ -21,6 +21,8 @@ vi.mock('@antv/g6', () => ({
     setData(data: any) { this.data = data; }
     setSize() {}
     setPlugins() {}
+    getElementPosition(id: string) { const n = this.data.nodes.find((node: any) => node.id === id); return [n.style.x, n.style.y]; }
+    getElementRenderBounds() { return { min: [0, 0], max: [500, 300] }; }
     getZoom() { return 1; }
     getViewportByCanvas() { return [0, 0]; }
     async zoomTo() {}
@@ -82,6 +84,34 @@ describe('G6 lifecycle and incremental state', () => {
     expect(graph.updateEdgeData).toHaveBeenLastCalledWith([
       { id: 'ab', style: { labelText: '→ 8 · ← 2', label: false, lineDash: [] } },
     ]);
+  });
+
+  it('hides calm lines and pins focus through unrelated hover without relayout', async () => {
+    const data = scene();
+    data.edges[0]!.hidden = true;
+    data.nodes.push(...data.nodes.map((node, i) => ({ ...node, id: i ? 'd' : 'c', y: 200 })));
+    data.edges.push({ ...data.edges[0]!, id: 'cd', source: 'c', target: 'd', originalIds: ['cd'], hidden: false });
+    await runtime.update(data, new Set(), new Set());
+    const graph = harness.graphs[0];
+    expect(graph.data.edges[0].style.visibility).toBe('hidden');
+    expect(runtime.snapshot().edges.map(e => e.id)).toEqual(['cd']);
+    data.nodes[0]!.selected = true;
+    data.edges[0]!.hidden = false;
+    data.edges[0]!.hot = true;
+    data.nodes[2]!.dimmed = data.nodes[3]!.dimmed = data.edges[1]!.dimmed = true;
+    await runtime.update(data, new Set(), new Set());
+    expect(graph.updateEdgeData).toHaveBeenLastCalledWith([{ id: 'ab', style: { visibility: 'visible' } }]);
+    expect(runtime.snapshot().edges.map(e => e.id)).toEqual(['ab','cd']);
+    const pinned = { a: ['selected'], ab: ['active'], c: ['dimmed'], d: ['dimmed'], cd: ['dimmed'] };
+    expect(graph.setElementState).toHaveBeenLastCalledWith(pinned, false);
+    graph.events.get('node:pointerenter')({ target: { id: 'c' } });
+    await runtime.settled();
+    expect(graph.setElementState).toHaveBeenLastCalledWith(pinned, false);
+    graph.events.get('edge:pointermove')({ target: { id: 'ab' } });
+    await runtime.settled();
+    expect(graph.setElementState).toHaveBeenLastCalledWith({ ab: ['pointed'] }, false);
+    expect(graph.render).toHaveBeenCalledOnce();
+    expect(graph.fitView).toHaveBeenCalledOnce();
   });
 
   it('drops stale queued geometry and only renders the latest scene', async () => {
