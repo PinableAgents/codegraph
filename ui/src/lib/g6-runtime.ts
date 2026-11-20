@@ -9,9 +9,9 @@ class RoutedEdge extends Cubic {
   private routePath: any;
   protected getKeyPath(attributes: any): any {
     const endpoints = this.getEndpoints(attributes);
-    const key = JSON.stringify([attributes.routeEpoch, attributes.straight, endpoints]);
+    const key = JSON.stringify([attributes.routeEpoch, attributes.straight, endpoints, attributes.avoidancePath]);
     if (key !== this.routeKey) {
-      this.routePath = attributes.straight ? [['M', ...endpoints[0]], ['L', ...endpoints[1]]] : super.getKeyPath(attributes);
+      this.routePath = attributes.avoidancePath?.length ? attributes.avoidancePath : attributes.straight ? [['M', ...endpoints[0]], ['L', ...endpoints[1]]] : super.getKeyPath(attributes);
       this.routeKey = key;
     }
     attributes.capturePath?.(this.routePath); return this.routePath;
@@ -70,6 +70,7 @@ export class G6Runtime implements GraphController {
   private states = new Map<string, string>();
   private edgeLabels = new Map<string,string>();
   private edgeVisibility = new Map<string, boolean>();
+  private edgeAvoidance = new Map<string, string>();
   private observer: ResizeObserver;
   private themeObserver: MutationObserver;
   private media = matchMedia('(prefers-color-scheme: dark)');
@@ -148,11 +149,14 @@ export class G6Runtime implements GraphController {
     return this.enqueue(async () => {
       if (generation !== this.generation) return;
       if (geometry !== this.geometry) {
-        const started = performance.now(); this.paths.clear(); this.labelPoints.clear(); this.states.clear(); this.edgeLabels.clear(); this.edgeVisibility.clear();
+        const started = performance.now(); this.paths.clear(); this.labelPoints.clear(); this.states.clear(); this.edgeLabels.clear(); this.edgeVisibility.clear(); this.edgeAvoidance.clear();
         const ids = new Set(scene.nodes.map(n => n.id));
         for (const [id, entry] of this.mounts) if (!ids.has(id)) { void unmount(entry.instance); this.mounts.delete(id); }
         const data = this.data(scene);
-        for (const edge of scene.edges) this.edgeVisibility.set(edge.id, edge.hidden === true);
+        for (const edge of scene.edges) {
+          this.edgeVisibility.set(edge.id, edge.hidden === true);
+          this.edgeAvoidance.set(edge.id, edge.avoidancePath ?? '');
+        }
         this.graph.setData(data);
         await this.graph.render();
         if (this.closed) return;
@@ -226,7 +230,10 @@ export class G6Runtime implements GraphController {
       endArrowSize: 7, startArrowSize: 7, radius: 6,
       curvePosition: [0.3, 0.7], curveOffset: [32, 32],
       routeEpoch: this.generation, straight: e.straight,
-      controlPoints: [], scenePath: e.path ? parseScenePath(e.path) : [],
+      // setData also merges styles for edges whose IDs survive a geometry
+      // change. Clear absolute routing points when a node moves or layout resets.
+      controlPoints: [], avoidancePath: e.avoidancePath ? parseScenePath(e.avoidancePath) : [],
+      scenePath: e.path ? parseScenePath(e.path) : [],
       capturePath: (path: any[]) => this.paths.set(e.id, path.map(command => command.join(' ')).join(' ')),
       captureLabel: (style:any) => {const t=style.transform?.find((p:any[])=>p[0]==='translate');this.labelPoints.set(e.id,{x:t?.[1]??style.x??0,y:t?.[2]??style.y??0});},
     } }));
@@ -243,6 +250,7 @@ export class G6Runtime implements GraphController {
     const changes: Record<string, string[]> = {};
     const labels:Partial<EdgeData>[]=[];
     const visibility:Partial<EdgeData>[]=[];
+    const routes:Partial<EdgeData>[]=[];
     const pinned = (this.scene.kind === 'map' || this.scene.kind === 'screens') && this.scene.nodes.some(n => n.selected);
     const relatedNodes = new Set<string>();
     const relatedEdges = new Set<string>();
@@ -267,6 +275,12 @@ export class G6Runtime implements GraphController {
     for (const e of this.scene.edges) {
       const labelKey=JSON.stringify([e.label,e.alwaysLabel,e.dashed,e.dashPattern]);
       if(this.edgeLabels.get(e.id)!==labelKey){this.edgeLabels.set(e.id,labelKey);labels.push({id:e.id,style:{labelText:e.label,label:!!e.alwaysLabel,lineDash:e.dashPattern??(e.dashed?[5,3]:[])}});}
+      const avoidance = e.avoidancePath ?? '';
+      if (this.edgeAvoidance.get(e.id) !== avoidance) {
+        // Explicitly clear the old path; G6 merges edge styles in place.
+        routes.push({ id: e.id, style: { avoidancePath: avoidance ? parseScenePath(avoidance) : [] } });
+        this.edgeAvoidance.set(e.id, avoidance);
+      }
       const hidden = e.hidden === true;
       if (this.edgeVisibility.get(e.id) !== hidden) {
         // A hidden shape cannot intercept pointer events like an opacity-zero edge.
@@ -280,7 +294,8 @@ export class G6Runtime implements GraphController {
     }
     if(labels.length) this.graph.updateEdgeData(labels);
     if(visibility.length) this.graph.updateEdgeData(visibility);
-    if(labels.length || visibility.length) await this.graph.draw();
+    if(routes.length) this.graph.updateEdgeData(routes);
+    if(labels.length || visibility.length || routes.length) await this.graph.draw();
     this.container.dataset.graphEdges = String(this.scene.edges.filter(e => !e.hidden).length);
     if (Object.keys(changes).length) await this.graph.setElementState(changes, false);
   }

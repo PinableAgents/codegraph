@@ -134,6 +134,33 @@ describe('G6 lifecycle and incremental state', () => {
     expect(graph.fitView).toHaveBeenCalledOnce();
   });
 
+  it('updates and clears the optional focus route without changing canvas geometry', async () => {
+    const data = scene();
+    await runtime.update(data, new Set(), new Set());
+    const graph = harness.graphs[0];
+    data.edges[0]!.avoidancePath = 'M200,24 L210,24 L210,0 L290,0 L290,24 L300,24';
+    await runtime.update(data, new Set(), new Set());
+    expect(graph.updateEdgeData).toHaveBeenLastCalledWith([{ id: 'ab', style: { avoidancePath: [
+      ['M', 200, 24], ['L', 210, 24], ['L', 210, 0], ['L', 290, 0], ['L', 290, 24], ['L', 300, 24],
+    ] } }]);
+    delete data.edges[0]!.avoidancePath;
+    await runtime.update(data, new Set(), new Set());
+    expect(graph.updateEdgeData).toHaveBeenLastCalledWith([{ id: 'ab', style: { avoidancePath: [] } }]);
+    expect(graph.render).toHaveBeenCalledOnce();
+    expect(graph.fitView).toHaveBeenCalledOnce();
+
+    // G6 setData merges same-ID styles even on a new geometry. A stale
+    // absolute route must be cleared explicitly while the new worker runs.
+    data.edges[0]!.avoidancePath = 'M200,24 L300,24';
+    await runtime.update(data, new Set(), new Set());
+    data.nodes[1]!.x += 50;
+    delete data.edges[0]!.avoidancePath;
+    await runtime.update(data, new Set(), new Set());
+    expect(graph.data.edges[0].style.avoidancePath).toEqual([]);
+    expect(graph.render).toHaveBeenCalledTimes(2);
+    expect(graph.fitView).toHaveBeenCalledOnce();
+  });
+
   it('drops stale queued geometry and only renders the latest scene', async () => {
     const stale = scene();
     const latest = scene();

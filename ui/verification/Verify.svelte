@@ -1,6 +1,6 @@
 <script lang="ts">
   import GraphCanvas from '../src/components/graph/GraphCanvas.svelte';
-  import type { GraphScene } from '../src/lib/graph-scene';
+  import type { GraphController, GraphScene } from '../src/lib/graph-scene';
   import MapView from '../src/views/MapView.svelte';
   import FlowView from '../src/views/FlowView.svelte';
   import ScreensView from '../src/views/ScreensView.svelte';
@@ -24,11 +24,30 @@
   adapter.steps=async()=>steps;setGraphAdapter(adapter);
   const count = Number(new URL(location.href).searchParams.get('nodes') ?? 12);
   let selected = $state<string|null>(null);
+  let controller = $state.raw<GraphController | null>(null);
+  let exported = $state('');
+  const verifyRouting = new URL(location.href).searchParams.has('routing');
+  const routingFixture: GraphScene = {
+    kind: 'map', groups: [],
+    nodes: [
+      { id: 'route-a', label: 'Source', x: 0, y: 100, width: 120, height: 50 },
+      { id: 'route-obstacle', label: 'Obstacle', x: 180, y: 40, width: 120, height: 180 },
+      { id: 'route-b', label: 'Target', x: 360, y: 100, width: 120, height: 50 },
+    ].map(box => ({ ...box, kind: 'module', sub: '', draggable: true })),
+    edges: [{ id: 'ab', source: 'route-a', target: 'route-b', label: '3', count: 3, width: 1.5, originalIds: ['ab'] }],
+    relations: [{ id: 'ab', source: 'route-a', target: 'route-b', count: 3 }],
+  };
   const ids = Array.from({length:count},(_,i)=>`src/module-${i}`);
   const scene = $derived<GraphScene>({kind:'map',groups:[],nodes:ids.map((id,i)=>({id,label:`模块 ${i} / module-${i}`,sub:'123 符号 · 12 文件',kind:'module',x:60+i%Math.ceil(Math.sqrt(count))*270,y:100+Math.floor(i/Math.ceil(Math.sqrt(count)))*150,width:200,height:48,selected:id===selected,draggable:true})),relations:ids.flatMap((id,i)=>Array.from({length:Math.min(5,count-1)},(_,j)=>({id:`${i}:${j}`,source:id,target:ids[(i+j+1)%count]!}))),edges:ids.flatMap((id,i)=>Array.from({length:Math.min(5,count-1)},(_,j)=>({id:`${i}:${j}`,source:id,target:ids[(i+j+1)%count]!,label:'1',width:1.5,originalIds:[`${i}:${j}`]})))});
 </script>
 {#if view}
   <nav>{#each ['map','flow','screens','steps'] as item}<a href={`?view=${item}`} onclick={e=>{e.preventDefault();history.pushState(null,'',`?view=${item}`);view=item;}}>{item}</a>{/each}<button onclick={()=>document.documentElement.setAttribute('data-theme',document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark')}>明暗主题</button></nav>
   <main>{#key view}{#if view==='map'}<MapView root="src" depth={1} tests={false}/>{:else if view==='flow'}<FlowView from="handleCallback" to="decodeJwt" symbols={null} trailParam={null}/>{:else if view==='screens'}<ScreensView/>{:else}<StepsView anchor="anchor" symbol={null} depth={8} through={false} reading={null}/>{/if}{/key}</main>
+{:else if verifyRouting}
+  <nav><button onclick={() => selected = 'route-a'}>Select source</button><button onclick={() => selected = null}>Clear selection</button>
+    <button onclick={() => { if (controller) exported = controller.exportSvg(1); }}>Capture SVG</button>
+    <textarea aria-label="Captured SVG" readonly value={exported}></textarea>
+  </nav>
+  <main><GraphCanvas scene={routingFixture} {selected} onSelect={id=>selected=id} bind:controller /></main>
 {:else}<GraphCanvas {scene} {selected} onSelect={id=>selected=id}/>{/if}
 <style>nav{height:44px;display:flex;align-items:center;gap:24px;padding:0 20px}main{position:absolute;inset:44px 0 0;display:flex;flex-direction:column}main :global(.graph-shell){flex:1;min-height:0}</style>

@@ -4,6 +4,7 @@
   import type { GraphController, GraphScene, Viewport } from '../../lib/graph-scene';
   import type { G6Runtime } from '../../lib/g6-runtime';
   import { directoryGroups, graphCycles, projectScene, shortestDirectedPath } from '../../lib/graph-analysis';
+  import { focusRoutingPlan, focusedEdgePaths, presentFocusedRoutes, startFocusedRouting, type EdgePaths, type GridRoutes } from '../../lib/focused-routing';
   import { overviewEdges, relationshipPresentation } from '../../lib/relationship-focus';
   import { oneHop } from '../../lib/graph-budget';
   import { readGraphHistory, saveGraphHistory } from '../../lib/graph-history';
@@ -44,6 +45,8 @@
   if (untrack(() => scene.kind) !== 'map') { direction = history.analysisDirection ?? 'both'; focusOnly = history.analysisFocus ?? false; }
   let minimap = $state(false);
   let showAllRelationships = $state(false);
+  let avoidNodes = $state(false);
+  let routing = $state.raw<{ key: string; status: 'working' | 'ready' | 'fallback'; paths?: EdgePaths } | null>(null);
   let highlighted = $state<string[]>([]);
   let cycleChoice = $state('');
   let zoomValue = $state(1);
@@ -67,6 +70,10 @@
   });
   const overview = $derived(supportsLayouts && !showAllRelationships && !focusOnly ? overviewEdges(projected) : null);
   const presentation = $derived(relationshipPresentation(displayed, overview, current, direction, new Set(highlighted)));
+  const routePlan = $derived(avoidNodes && !layoutBusy && !layoutError ? focusRoutingPlan(presentation, current, direction, collapsed) : null);
+  const routeKey = $derived(typeof routePlan === 'object' && routePlan !== null ? routePlan.key : null);
+  const routed = $derived(presentFocusedRoutes(presentation, routeKey && routing?.key === routeKey ? routing.paths : undefined));
+  const routeStatus = $derived(routeKey && routing?.key === routeKey ? routing.status : null);
   const hiddenRelationships = $derived(presentation.edges.filter(e => e.hidden).length);
   const matches = $derived(realNodes.filter(n => n.label.toLowerCase().includes(query.toLowerCase())).slice(0, query ? 20 : 0));
 
@@ -137,7 +144,25 @@
     return () => { cancel(); finish(); };
   });
   $effect(() => {
-    const next = presentation, hidden = new Set(collapsed), active = new Set(highlighted), graph = runtime;
+    const key = routeKey;
+    // Only a changed geometry/focus key restarts routing. Hover, zoom, labels,
+    // and unrelated analysis styles cannot retrigger this Worker.
+    const plan = untrack(() => routePlan);
+    routing = null;
+    if (key === null || !plan || typeof plan === 'string') return;
+    if (typeof Worker === 'undefined') { routing = { key, status: 'fallback' }; return; }
+    routing = { key, status: 'working' };
+    return startFocusedRouting(
+      (done, fail) => requestLayout<GridRoutes>('scene-routes', plan.input, {}, done, fail),
+      routes => {
+        const paths = focusedEdgePaths(plan.input, routes);
+        routing = { key, status: Object.keys(paths).length ? 'ready' : 'fallback', paths };
+      },
+      () => { routing = { key, status: 'fallback' }; },
+    );
+  });
+  $effect(() => {
+    const next = routed, hidden = new Set(collapsed), active = new Set(highlighted), graph = runtime;
     if (current) active.add(current);
     if (layoutBusy || layoutError) return;
     const fit = fitAfterLayout, signature = `${layoutMode}:${layoutKey}`; fitAfterLayout = false;
@@ -181,6 +206,8 @@
     {#if supportsLayouts}
       <button aria-pressed={showAllRelationships} disabled={focusOnly}
         onclick={() => showAllRelationships = !showAllRelationships}>{t('显示当前范围全部关系', 'Show all relationships in scope')}</button>
+      <button aria-pressed={avoidNodes} onclick={() => avoidNodes = !avoidNodes}
+        title={t('只为当前选中节点的一跳关系计算绕行', 'Route only the selected node’s one-hop links')}>{t('避让节点', 'Avoid nodes')}</button>
       {#if hiddenRelationships > 0}
         <span class="hidden-count" role="status">{hiddenRelationships} {t('条连线已收起', 'lines hidden')}</span>
       {/if}
@@ -227,6 +254,18 @@
     {/if}
   </div>
   {#if notice}<div class="notice" role="status">{notice}</div>{/if}
+  {#if avoidNodes}
+    <div class="routing-status" role="status">
+      {#if routeStatus === 'working'}{t('正在避让节点…', 'Routing around nodes…')}
+      {:else if routeStatus === 'ready'}{Object.keys(routing!.paths!).length} {t('条选中连线已绕行', 'selected links routed around nodes')}
+      {:else if routePlan === 'budget'}{t('范围过大，使用原连线', 'Scope too large; using original links')}
+      {:else if routePlan === 'folded'}{t('已折叠分组，使用原连线', 'Groups are folded; using original links')}
+      {:else if routeStatus === 'fallback'}{t('当前无法避让，使用原连线', 'Routing unavailable; using original links')}
+      {:else if current}{t('当前没有可绕行的连线', 'No eligible links in this selection')}
+      {:else}{t('选择节点以避让一跳连线', 'Select a node to route one-hop links')}
+      {/if}
+    </div>
+  {/if}
   {#if layoutBusy}<div class="notice" role="status">{t('正在计算布局…', 'Calculating layout…')}</div>{/if}
   {#if error || layoutError}<div class="error" role="alert">{layoutError || error}</div>{/if}
   <div class="zoom"><button aria-label={t('放大', 'Zoom in')} onclick={() => runtime?.zoom(zoomValue * 1.25)}>＋</button><button aria-label={t('缩小', 'Zoom out')} onclick={() => runtime?.zoom(zoomValue / 1.25)}>−</button></div>
@@ -246,6 +285,7 @@
   .toolbar{position:absolute;z-index:10;top:12px;left:12px;right:12px;display:flex;flex-wrap:wrap;gap:5px;pointer-events:none}.toolbar>*{pointer-events:auto}
   /* The dropdown action creates this wrapper outside Svelte's scoped markup. */
   .toolbar>:global(.cg-select){pointer-events:auto}
+  .routing-status{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);max-width:50%;pointer-events:none;padding:4px 7px;background:var(--paper-2);border:1px solid var(--rule-soft);font:12px var(--sans);color:var(--ink-2)}
   .hidden-count{align-self:center;background:var(--paper-2);padding:4px 7px;font:12px var(--sans);color:var(--ink-2)}
   .recent{font:12px var(--sans);color:var(--ink-2)}
   .recent-items button{text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.recent-empty{color:var(--ink-3)}
