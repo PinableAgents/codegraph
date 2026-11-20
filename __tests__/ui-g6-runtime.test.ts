@@ -114,6 +114,26 @@ describe('G6 lifecycle and incremental state', () => {
     expect(graph.fitView).toHaveBeenCalledOnce();
   });
 
+  it.each(['map', 'screens'] as const)('restores native %s node opacity without rerendering geometry', async (kind) => {
+    const data = { ...scene(), kind };
+    await runtime.update(data, new Set(), new Set());
+    const graph = harness.graphs[0];
+    // G6 merges the computed style into the existing shape on each draw.
+    // Without a resting opacity, removing the dimmed state leaves .25 applied.
+    expect(graph.data.nodes.every((node: { style: { opacity?: number } }) => node.style.opacity === 1)).toBe(true);
+
+    data.nodes[0]!.selected = true;
+    data.nodes[1]!.dimmed = true;
+    await runtime.update(data, new Set(), new Set());
+    expect(graph.setElementState).toHaveBeenLastCalledWith({ a: ['selected'], b: ['dimmed'] }, false);
+
+    data.nodes[1]!.dimmed = false;
+    await runtime.update(data, new Set(), new Set());
+    expect(graph.setElementState).toHaveBeenLastCalledWith({ b: [] }, false);
+    expect(graph.render).toHaveBeenCalledOnce();
+    expect(graph.fitView).toHaveBeenCalledOnce();
+  });
+
   it('drops stale queued geometry and only renders the latest scene', async () => {
     const stale = scene();
     const latest = scene();
