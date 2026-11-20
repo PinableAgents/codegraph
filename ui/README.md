@@ -319,7 +319,9 @@ All four canvases now use exact `@antv/g6@5.1.1` and `@antv/layout@2.0.0`. The h
 
 Map and Screens start with a calmer view: redundant single-evidence module links or inferred screen transitions may be hidden, while strong/direct links and each node's available incoming and outgoing directions remain represented. **Show all relationships in scope** restores the hidden lines, not relationships excluded by explicit scope or weight filters. Selecting a node keeps its requested incoming/outgoing one-hop links visible and highlights them without rearranging nodes. Path analysis still uses the full loaded scope and reveals its hidden links; exports capture the visible presentation. The details panel keeps original endpoints and the available evidence; Map module counts do not imply a source location. Flow and Steps retain their original execution order and presentation.
 
-See [architecture and verification](../docs/design/g6-graph-workbench.md) for layouts, shared obstacle routing, grouping, directed BFS and budgets. To inspect fixtures locally, run `npm run dev -w ui` and open `/g6-verify.html?view=map` (also flow/screens/steps), or `/g6-verify.html?nodes=400`. These verification entries are excluded from production builds.
+**Avoid nodes** is opt-in on Map and Screens. It routes only the selected direction's visible one-hop links in a bounded worker, leaving node positions, arrows and source evidence alone. Other links and self-loops keep their original style; explicit straight lines, folded groups, unavailable workers and scopes beyond 80 nodes or 12 eligible links keep the original paths. Resetting selection or turning it off restores the original drawing. SVG capture uses the rendered path.
+
+See [architecture and verification](../docs/design/g6-graph-workbench.md) for layouts, shared obstacle routing, grouping, directed BFS and budgets. To inspect fixtures locally, run `npm run dev -w ui` and open `/g6-verify.html?view=map` (also flow/screens/steps), or `/g6-verify.html?nodes=400`. The deterministic detour fixture is `/g6-verify.html?routing=1`. These verification entries are excluded from production builds.
 
 ## Where the graph stops
 

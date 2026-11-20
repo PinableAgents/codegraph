@@ -100,6 +100,7 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### New Features
 
+- Map and Screens can optionally route selected one-hop lines around intervening nodes without changing the graph layout.
 - Map and Screens now quiet redundant weak lines until requested, and a selected node keeps its incoming or outgoing one-hop relationships highlighted without moving the canvas.
 
 - `codegraph files --format package` and `codegraph_files` with `format: "package"` now group files by their nearest `package.json` or `composer.json`, so a monorepo splits into its workspaces. Thanks @LuisAlbertoMK. (#1871)
