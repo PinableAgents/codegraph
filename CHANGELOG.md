@@ -99,6 +99,8 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### New Features
 
+- Map and Screens now quiet redundant weak lines until requested, and a selected node keeps its incoming or outgoing one-hop relationships highlighted without moving the canvas.
+
 - `codegraph files --format package` and `codegraph_files` with `format: "package"` now group files by their nearest `package.json` or `composer.json`, so a monorepo splits into its workspaces. Thanks @LuisAlbertoMK. (#1871)
 - In C#, MediatR `Send` and `Publish` now reach handlers written against the project's own interfaces, like `ICommandHandler<T>`, or a package's, like the Mediator library's, with no setup. Thanks @PressXtoChris.
 - `codegraph files --json` now marks test files, `--tests` and `--no-tests` filter the list, and `codegraph node --file` says "test file" in its header. Thanks @maxmilian. (#1877)

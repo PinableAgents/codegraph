@@ -4,6 +4,7 @@
   import type { GraphController, GraphScene, Viewport } from '../../lib/graph-scene';
   import type { G6Runtime } from '../../lib/g6-runtime';
   import { directoryGroups, graphCycles, projectScene, shortestDirectedPath } from '../../lib/graph-analysis';
+  import { overviewEdges, relationshipPresentation } from '../../lib/relationship-focus';
   import { oneHop } from '../../lib/graph-budget';
   import { readGraphHistory, saveGraphHistory } from '../../lib/graph-history';
   import { graphText as t } from '../../lib/graph-copy';
@@ -42,6 +43,7 @@
   let grouping = $state<'directory' | 'cycles'>(history.grouping ?? 'directory');
   if (untrack(() => scene.kind) !== 'map') { direction = history.analysisDirection ?? 'both'; focusOnly = history.analysisFocus ?? false; }
   let minimap = $state(false);
+  let showAllRelationships = $state(false);
   let highlighted = $state<string[]>([]);
   let cycleChoice = $state('');
   let zoomValue = $state(1);
@@ -63,6 +65,9 @@
     ...projected, nodes: projected.nodes.map(n=>({...n,...placement!.positions[n.id],...layoutPositions[layoutMode]?.[n.id]})),
     edges: projected.edges.map(e=>({...e,path:undefined,points:undefined,labelPoint:undefined})),
   });
+  const overview = $derived(supportsLayouts && !showAllRelationships && !focusOnly ? overviewEdges(projected) : null);
+  const presentation = $derived(relationshipPresentation(displayed, overview, current, direction, new Set(highlighted)));
+  const hiddenRelationships = $derived(presentation.edges.filter(e => e.hidden).length);
   const matches = $derived(realNodes.filter(n => n.label.toLowerCase().includes(query.toLowerCase())).slice(0, query ? 20 : 0));
 
   function move(id: string, x: number, y: number) {
@@ -89,6 +94,11 @@
 
   }
   function choose(id: string | null) { remember(id); localSelected = id; onSelect(id); }
+  function chooseAccessible(id: string) {
+    const concealed = !projectedIds.has(id) || groups.some(g => collapsed.includes(g.id) && g.members.includes(id));
+    choose(id);
+    if (!supportsLayouts || concealed) void reveal([id]);
+  }
   // Also capture selections made by the Map details panel or restored by its parent.
   $effect(() => { const id = current; untrack(()=>remember(id)); });
   async function reveal(ids: string[]) {
@@ -127,13 +137,13 @@
     return () => { cancel(); finish(); };
   });
   $effect(() => {
-    const next = displayed, hidden = new Set(collapsed), active = new Set(highlighted), graph = runtime;
+    const next = presentation, hidden = new Set(collapsed), active = new Set(highlighted), graph = runtime;
     if (current) active.add(current);
     if (layoutBusy || layoutError) return;
     const fit = fitAfterLayout, signature = `${layoutMode}:${layoutKey}`; fitAfterLayout = false;
     void graph?.update(next, hidden, active).then(() => !disposed && fit && signature === `${layoutMode}:${layoutKey}` ? graph.fit() : undefined);
   });
-  $effect(()=>{const folded=projected.groups.filter(g=>collapsed.includes(g.id));const hidden=new Set(folded.flatMap(g=>g.members));onVisibleChange({nodes:projected.nodes.filter(n=>!hidden.has(n.id)).length+folded.length,edges:projected.edges.length});});
+  $effect(()=>{const folded=projected.groups.filter(g=>collapsed.includes(g.id));const hidden=new Set(folded.flatMap(g=>g.members));onVisibleChange({nodes:projected.nodes.filter(n=>!hidden.has(n.id)).length+folded.length,edges:presentation.edges.length-hiddenRelationships});});
   $effect(() => { if (runtime) runtime.setMinimap(minimap); });
   $effect(() => { if (locate && runtime) { const id = locate.id; untrack(() => void reveal([id])); } });
   $effect(() => { if (fitRequest && runtime) untrack(() => void settled().then(()=>runtime?.fit())); });
@@ -169,6 +179,11 @@
     <button disabled={!current} onclick={() => current && reveal([current])}>{t('定位选中', 'Focus selection')}</button>
     <button aria-pressed={minimap} onclick={() => minimap = !minimap}>{t('缩略图', 'Minimap')}</button>
     {#if supportsLayouts}
+      <button aria-pressed={showAllRelationships} disabled={focusOnly}
+        onclick={() => showAllRelationships = !showAllRelationships}>{t('显示当前范围全部关系', 'Show all relationships in scope')}</button>
+      {#if hiddenRelationships > 0}
+        <span class="hidden-count" role="status">{hiddenRelationships} {t('条连线已收起', 'lines hidden')}</span>
+      {/if}
       <select use:selectDropdown aria-label={t('图布局', 'Graph layout')} value={layoutMode} onchange={e=>{fitAfterLayout=true;layoutMode=e.currentTarget.value as RelationshipLayout;}}>
         <option value="default">{t('分层', 'Hierarchical')}</option>
         <option value="force">{t('力导向', 'Force-directed')}</option>
@@ -180,7 +195,7 @@
     <details use:dismissDropdown>
       <summary>{t('分析', 'Analyze')}</summary>
       <div class="analysis">
-        <label>{t('上下游', 'Direction')}<select use:selectDropdown bind:value={direction}><option value="both">{t('双向', 'Both')}</option><option value="in">{t('上游', 'Incoming')}</option><option value="out">{t('下游', 'Outgoing')}</option></select></label>
+        {#if !supportsLayouts}<label>{t('上下游', 'Direction')}<select use:selectDropdown bind:value={direction}><option value="both">{t('双向', 'Both')}</option><option value="in">{t('上游', 'Incoming')}</option><option value="out">{t('下游', 'Outgoing')}</option></select></label>{/if}
         <label><input type="checkbox" bind:checked={focusOnly} />{t('只看一跳聚焦', 'Focus one hop')}</label>
         <label>{t('起点', 'From')}<select use:selectDropdown bind:value={from}><option value="">—</option>{#each realNodes as n (n.id)}<option value={n.id}>{n.label}</option>{/each}</select></label>
         <label>{t('终点', 'To')}<select use:selectDropdown bind:value={to}><option value="">—</option>{#each realNodes as n (n.id)}<option value={n.id}>{n.label}</option>{/each}</select></label>
@@ -215,7 +230,7 @@
   {#if layoutBusy}<div class="notice" role="status">{t('正在计算布局…', 'Calculating layout…')}</div>{/if}
   {#if error || layoutError}<div class="error" role="alert">{layoutError || error}</div>{/if}
   <div class="zoom"><button aria-label={t('放大', 'Zoom in')} onclick={() => runtime?.zoom(zoomValue * 1.25)}>＋</button><button aria-label={t('缩小', 'Zoom out')} onclick={() => runtime?.zoom(zoomValue / 1.25)}>−</button></div>
-  <details use:dismissDropdown class="accessible"><summary>{t('节点列表／键盘导航', 'Node list / keyboard navigation')}</summary><div class="analysis">{#each realNodes as n (n.id)}<button aria-pressed={n.id === current} onclick={() => { choose(n.id); void reveal([n.id]); }} onkeydown={e => {
+  <details use:dismissDropdown class="accessible"><summary>{t('节点列表／键盘导航', 'Node list / keyboard navigation')}</summary><div class="analysis">{#each realNodes as n (n.id)}<button aria-pressed={n.id === current} onclick={() => chooseAccessible(n.id)} onkeydown={e => {
     if (!e.altKey || !n.draggable) return;
     const delta: Record<string, [number, number]> = { ArrowLeft: [-10, 0], ArrowRight: [10, 0], ArrowUp: [0, -10], ArrowDown: [0, 10] };
     const d = delta[e.key], position = displayed.nodes.find(node=>node.id===n.id) ?? n;
@@ -231,6 +246,7 @@
   .toolbar{position:absolute;z-index:10;top:12px;left:12px;right:12px;display:flex;flex-wrap:wrap;gap:5px;pointer-events:none}.toolbar>*{pointer-events:auto}
   /* The dropdown action creates this wrapper outside Svelte's scoped markup. */
   .toolbar>:global(.cg-select){pointer-events:auto}
+  .hidden-count{align-self:center;background:var(--paper-2);padding:4px 7px;font:12px var(--sans);color:var(--ink-2)}
   .recent{font:12px var(--sans);color:var(--ink-2)}
   .recent-items button{text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.recent-empty{color:var(--ink-3)}
   input,button,select,summary{font:12px var(--sans);color:var(--ink);background:var(--paper-2);border:1px solid var(--rule-soft);border-radius:4px;padding:7px;box-sizing:border-box;min-height:32px}

@@ -18,6 +18,7 @@
 -->
 <script lang="ts">
   import { selectDropdown } from '../lib/dropdown';
+  import { touchesSelection, type RelationshipDirection } from '../lib/relationship-focus';
   import { graphStatus } from '../lib/graph-status.svelte';
   import DirectoryBrowser from '../components/graph/DirectoryBrowser.svelte';
   import { getGraphAdapter } from '../lib/adapter';
@@ -53,6 +54,7 @@
   let error = $state<string | null>(null);
   let loading = $state(true);
   let selected = $state<string | null>(null);
+  let focusDirection = $state<RelationshipDirection>('both');
   let hovered = $state<{ edge: MapEdgeLayout; x: number; y: number } | null>(null);
   /** The panel row under the pointer: its edge on the canvas, and the one transition it names. */
   let panelHot = $state<{ edge: string; link: WireScreenLink } | null>(null);
@@ -121,8 +123,7 @@
     if (model === null || selected === null) return null;
     const set = new Set<string>([selected]);
     for (const edge of model.layout.edges) {
-      if (edge.source === selected) set.add(edge.target);
-      if (edge.target === selected) set.add(edge.source);
+      if (touchesSelection(edge, selected, focusDirection)) { set.add(edge.source); set.add(edge.target); }
     }
     return set;
   });
@@ -168,7 +169,7 @@
     return model.layout.edges
 
       .map((edge) => {
-        const touches = selected !== null && (edge.source === selected || edge.target === selected);
+        const touches = touchesSelection(edge, selected, focusDirection);
         const isFocus = focus === edge.id;
         const hot = isFocus || touches;
         return {
@@ -191,7 +192,7 @@
             soft: hot && focus !== null && !isFocus,
             focus: isFocus,
             dimmed: selected !== null && !touches,
-            pill: pills?.pills.get(edge.id) ?? (isFocus ? focusPill : null),
+            pill: touches ? pills?.pills.get(edge.id) ?? (isFocus ? focusPill : null) : (isFocus ? focusPill : null),
             full: panelHot?.edge === edge.id ? fullText(panelHot.link) : null,
             onHover: onEdgeHover,
           },
@@ -262,6 +263,7 @@
   const stateKey = typeof location === 'undefined' ? '' : location.href;
   const restored = untrack(() => readGraphHistory(stateKey));
   if (restored.selected) selected = restored.selected;
+  focusDirection = restored.analysisDirection ?? 'both';
   scope = restored.scope ?? '';
   $effect(() => saveGraphHistory(stateKey, { selected, scope }));
 
@@ -283,6 +285,7 @@
 {#if selectionNotice}<div role="status">{selectionNotice}</div>{/if}
 <div class="scopebar" role="toolbar" aria-label={graphText('页面图范围', 'Screens scope')}>
   <label>{graphText('范围', 'Scope')} <select use:selectDropdown bind:value={scope}><option value="">{graphText('所有页面', 'All screens')}</option>{#each payload?.screens ?? [] as screen (screen.id)}<option value={screen.id}>{screen.path}</option>{/each}</select></label>
+  <label>{graphText('一跳方向', 'One-hop direction')} <select use:selectDropdown bind:value={focusDirection}><option value="both">{graphText('双向', 'Both')}</option><option value="in">{graphText('进入此页', 'Incoming')}</option><option value="out">{graphText('离开此页', 'Outgoing')}</option></select></label>
   <button disabled={!selected} onclick={() => scope = selected ?? ''}>{graphText('聚焦选中一跳', 'Focus one hop')}</button>
   <button disabled={!scope} onclick={() => scope = ''}>{graphText('重置范围', 'Reset scope')}</button>
   <button disabled={!selected} onclick={() => selected && navigate(stepsHref({ anchor: selected }))}>{graphText('查看此处步骤', 'Read steps from here')}</button>
@@ -312,7 +315,7 @@
         </p>
       </div>
     {:else if model !== null}
-      <GraphCanvas scene={canvasScene} onVisibleChange={counts=>visibleCounts=counts} {selected}
+      <GraphCanvas scene={canvasScene} onVisibleChange={counts=>visibleCounts=counts} {selected} bind:direction={focusDirection}
         onSelect={id => { selected = id; hovered = null; panelHot = null; }} />
 
       <!-- The key, on the picture it explains. Each row draws the actual
@@ -407,6 +410,7 @@
           </p>
         {/if}
 
+        {#if focusDirection !== 'out'}
         <h4>Opens from <span class="dim">{lists.opensFrom.length}</span></h4>
         {#if lists.opensFrom.length === 0}
           <p class="dim">
@@ -439,6 +443,8 @@
           </div>
         {/snippet}</VirtualList>
 
+        {/if}
+        {#if focusDirection !== 'in'}
         <h4>Goes to <span class="dim">{lists.goesTo.length}</span></h4>
         {#if lists.goesTo.length === 0}<p class="dim">No navigation leaves this screen.</p>{/if}
         <VirtualList items={lists.goesTo} rowHeight={100}>{#snippet row(link)}
@@ -468,6 +474,7 @@
             {/each}
           </div>
         {/snippet}</VirtualList>
+        {/if}
       {:else}
         <div class="head"><div class="big">Screens</div></div>
         <p>

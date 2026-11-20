@@ -29,7 +29,7 @@ export interface SceneNode extends Point {
 export interface SceneEdge extends GraphRelation {
   label: string; alwaysLabel?: boolean; dashed?: boolean; arrow?: boolean;
   dashPattern?: number[];
-  width: number; hot?: boolean; dimmed?: boolean; flowing?: boolean;
+  width: number; hot?: boolean; dimmed?: boolean; flowing?: boolean; hidden?: boolean; pointed?: boolean;
   path?: string; points?: [number, number][]; reverseCount?: number;
   straight?: boolean;
   labelPoint?: Point;
