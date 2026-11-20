@@ -208,6 +208,9 @@ export class G6Runtime implements GraphController {
       x: n.x + n.width / 2, y: n.y + n.height / 2, size: [n.width, n.height], radius: 4,
       fill: ['region', 'decision'].includes(n.kind) ? 'transparent' : this.colors.paper,
       stroke: ['region', 'decision'].includes(n.kind) ? 'transparent' : this.colors.line,
+      // G6 merges shape attributes on update. Supply the resting opacity so
+      // clearing the dimmed state restores the already-rendered native node.
+      ...(scene.kind === 'map' || scene.kind === 'screens' ? { opacity: 1 } : {}),
       lineWidth: 1.8, lineDash: n.dashed ? [5, 3] : [],
       labelText: `${n.entry ? '● ' : ''}${n.cyclic?'↻ ':''}${n.label}${n.sub ? `\n${n.sub}` : ''}`, labelPlacement: 'center',
       labelFontFamily: 'monospace', labelFontSize: n.kind === 'fork' ? 10 : 12, labelLineHeight: 16,
