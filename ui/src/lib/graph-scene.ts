@@ -32,6 +32,7 @@ export interface SceneEdge extends GraphRelation {
   width: number; hot?: boolean; dimmed?: boolean; flowing?: boolean; hidden?: boolean; pointed?: boolean;
   path?: string; avoidancePath?: string; points?: [number, number][]; reverseCount?: number;
   straight?: boolean;
+  displayArrows?: boolean;
   labelPoint?: Point;
   originalIds: string[];
   onHover?: (event: MouseEvent | null) => void;
@@ -39,11 +40,13 @@ export interface SceneEdge extends GraphRelation {
 export interface SceneGroup { id: string; label: string; members: string[]; bounds?: Point & {width:number;height:number} }
 export interface GraphScene {
   kind: 'map' | 'flow' | 'screens' | 'steps';
+  appearance?: 'orbit';
+  showArrows?: boolean;
   nodes: SceneNode[]; edges: SceneEdge[];
   /** Real directed relationships, before cosmetic merging/folding. */
   relations: GraphRelation[]; groups: SceneGroup[];
 }
-export interface GraphSnapshot { nodes: SceneNode[]; edges: SceneEdge[]; groups: SceneGroup[]; bounds?: Point & {width:number;height:number} }
+export interface GraphSnapshot { appearance?: GraphScene['appearance']; nodes: SceneNode[]; edges: SceneEdge[]; groups: SceneGroup[]; bounds?: Point & {width:number;height:number} }
 export interface GraphController {
   fit(): Promise<void>; focus(ids: string[]): Promise<void>;
   zoom(value: number): Promise<void>; viewport(): Viewport;

@@ -1298,7 +1298,7 @@ it('G6节点移动保存位置，流向播放和恢复布局保持可用', async
    const play = [...host.querySelectorAll<HTMLButtonElement>('button')].find(b => /播放流向|Play flow/.test(b.textContent ?? ''))!;
    play.click(); flushSync(); await vi.waitFor(() => expect(g6Harness.scene.edges.some((e: any) => e.flowing)).toBe(true));
    play.click(); flushSync(); expect(readGraphHistory(location.href).flowPlaying).toBe(false);
-   const reset = [...host.querySelectorAll<HTMLButtonElement>('button')].find(b => /恢复自动布局|Reset layout/.test(b.textContent ?? ''))!;
+   const reset = [...host.querySelectorAll<HTMLButtonElement>('button')].find(b => /恢复分层布局|Restore hierarchical layout/.test(b.textContent ?? ''))!;
    expect(reset.disabled).toBe(false); reset.click(); flushSync(); expect(readGraphHistory(location.href).positions).toEqual({});
  });
 

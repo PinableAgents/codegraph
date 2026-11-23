@@ -10,6 +10,7 @@
   import { readGraphHistory, saveGraphHistory } from '../../lib/graph-history';
   import { graphText as t } from '../../lib/graph-copy';
   import { requestLayout } from '../../lib/graph-layout';
+  import { orbitNodes, orbitNodeSizes } from '../../lib/map-orbit';
   import type { LayoutPositions, RelationshipLayout, RelationshipLayoutInput } from '../../lib/relationship-layout';
 
   let { scene, selected, onSelect = () => {}, onMove = () => {}, onViewport = () => {}, onReset = () => {}, onVisibleChange = () => {},
@@ -30,7 +31,9 @@
   const history = untrack(() => readGraphHistory(key));
   let recentNodes = $state(history.recentNodes ?? []);
   const supportsLayouts = $derived(scene.kind === 'map' || scene.kind === 'screens');
-  layoutMode = untrack(() => supportsLayouts) ? history.relationshipLayout ?? untrack(()=>layoutMode) : 'default';
+  const defaultLayout = untrack(() => scene.kind === 'map' ? layoutMode : 'default');
+  const savedLayout = history.relationshipLayout === 'orbit' && untrack(() => scene.kind) !== 'map' ? undefined : history.relationshipLayout;
+  layoutMode = untrack(() => supportsLayouts) ? savedLayout ?? defaultLayout : 'default';
   let layoutPositions = $state(history.layoutPositions ?? {});
   let placement = $state.raw<{key: string; positions: LayoutPositions} | null>(null);
   let layoutBusy = $state(false), layoutError = $state('');
@@ -45,6 +48,8 @@
   if (untrack(() => scene.kind) !== 'map') { direction = history.analysisDirection ?? 'both'; focusOnly = history.analysisFocus ?? false; }
   let minimap = $state(false);
   let showAllRelationships = $state(false);
+  let showArrows = $state(false);
+  const orbit = $derived(scene.kind === 'map' && layoutMode === 'orbit');
   let avoidNodes = $state(false);
   let routing = $state.raw<{ key: string; status: 'working' | 'ready' | 'fallback'; paths?: EdgePaths } | null>(null);
   let highlighted = $state<string[]>([]);
@@ -60,12 +65,17 @@
   const focus = $derived(focusOnly ? oneHop(current, scene.relations, direction) : null);
   const projected = $derived(projectScene({...scene,nodes:scene.nodes.map(n=>({...n,cyclic:cycleMembers.has(n.id)}))}, groups, new Set(collapsed), focus));
   const projectedIds = $derived(new Set(projected.nodes.map(n=>n.id)));
+  const orbitSizes = $derived(orbit ? orbitNodeSizes(scene) : null);
+  const geometryNodes = $derived(orbitSizes ? orbitNodes(projected.nodes, orbitSizes) : projected.nodes);
   // Selection, hover, folding, playback and manual positions do not restart the layout Worker.
-  const layoutKey = $derived(JSON.stringify({ nodes: projected.nodes.map(n => ({id:n.id,width:n.width,height:n.height})),
+  const layoutKey = $derived(JSON.stringify({ nodes: geometryNodes.map(n => ({id:n.id,width:n.width,height:n.height})),
     relations: scene.relations.filter(e => projectedIds.has(e.source) && projectedIds.has(e.target)).map(e=>({id:e.id,source:e.source,target:e.target})),
     groups: projected.groups.map(g=>({id:g.id,members:g.members})) } satisfies RelationshipLayoutInput));
   const displayed = $derived<GraphScene>(layoutMode === 'default' || placement?.key !== `${layoutMode}:${layoutKey}` ? projected : {
-    ...projected, nodes: projected.nodes.map(n=>({...n,...placement!.positions[n.id],...layoutPositions[layoutMode]?.[n.id]})),
+    ...projected,
+    appearance: orbit ? 'orbit' : undefined,
+    showArrows,
+    nodes: geometryNodes.map(n=>({...n,...placement!.positions[n.id],...layoutPositions[layoutMode]?.[n.id]})),
     edges: projected.edges.map(e=>({...e,path:undefined,points:undefined,labelPoint:undefined})),
   });
   const overview = $derived(supportsLayouts && !showAllRelationships && !focusOnly ? overviewEdges(projected) : null);
@@ -89,7 +99,7 @@
     }
   }
   async function restore() {
-    fitAfterLayout = true; layoutMode = 'default'; layoutPositions = {};
+    fitAfterLayout = true; layoutMode = defaultLayout; layoutPositions = {};
     onReset(); collapsed = []; focusOnly = false;
     await settled(); await runtime?.fit();
   }
@@ -191,7 +201,7 @@
   });
 </script>
 
-<div class="graph-canvas" data-graph-engine="g6" data-layout={layoutMode} aria-busy={layoutBusy}
+<div class="graph-canvas" class:orbit data-graph-engine="g6" data-layout={layoutMode} aria-busy={layoutBusy}
   style:background-size={`${gridSize}px ${gridSize}px`} style:background-position={`${gridViewport.x}px ${gridViewport.y}px`}>
   <div class="surface" bind:this={host}></div>
   <div class="toolbar" role="toolbar" aria-label={t('图分析工具', 'Graph analysis tools')}>
@@ -212,12 +222,14 @@
         <span class="hidden-count" role="status">{hiddenRelationships} {t('条连线已收起', 'lines hidden')}</span>
       {/if}
       <select use:selectDropdown aria-label={t('图布局', 'Graph layout')} value={layoutMode} onchange={e=>{fitAfterLayout=true;layoutMode=e.currentTarget.value as RelationshipLayout;}}>
+        {#if scene.kind === 'map'}<option value="orbit">{t('星点', 'Constellation')}</option>{/if}
         <option value="default">{t('分层', 'Hierarchical')}</option>
         <option value="force">{t('力导向', 'Force-directed')}</option>
         <option value="concentric">{t('同心圆', 'Concentric')}</option>
         <option value="circular">{t('环形', 'Circular')}</option>
       </select>
     {/if}
+    {#if orbit}<button aria-pressed={showArrows} onclick={() => showArrows = !showArrows}>{t('显示方向箭头', 'Show direction arrows')}</button>{/if}
     <button onclick={restore}>{t('恢复布局', 'Restore layout')}</button>
     <details use:dismissDropdown>
       <summary>{t('分析', 'Analyze')}</summary>
@@ -280,6 +292,7 @@
 <style>
   .graph-canvas,.surface{position:absolute;inset:0}
   .graph-canvas{background-color:var(--paper);background-image:linear-gradient(to right,var(--route-grid) 1px,transparent 1px),linear-gradient(to bottom,var(--route-grid) 1px,transparent 1px);overflow:hidden}
+  .graph-canvas.orbit{background-image:none;background-color:var(--paper)}
   .surface{touch-action:none}
   .surface :global([data-graph-cycle=true])::after{content:'↻';position:absolute;right:4px;top:-15px;font:14px monospace;color:var(--ink-2);background:var(--paper)}
   .toolbar{position:absolute;z-index:10;top:12px;left:12px;right:12px;display:flex;flex-wrap:wrap;gap:5px;pointer-events:none}.toolbar>*{pointer-events:auto}

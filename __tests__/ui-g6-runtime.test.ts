@@ -10,20 +10,23 @@ vi.mock('@antv/g6', () => ({
   Graph: class {
     events = new Map();
     data: any;
+    zoom = 1;
+    options: any;
+    updateNodeData = vi.fn();
     render = vi.fn(async () => {});
     draw = vi.fn(async () => {});
     destroy = vi.fn();
     setElementState = vi.fn(async () => {});
     updateEdgeData = vi.fn();
     fitView = vi.fn(async () => {});
-    constructor() { harness.graphs.push(this); }
+    constructor(options: any) { this.options = options; harness.graphs.push(this); }
     on(name: string, fn: any) { this.events.set(name, fn); }
     setData(data: any) { this.data = data; }
     setSize() {}
     setPlugins() {}
     getElementPosition(id: string) { const n = this.data.nodes.find((node: any) => node.id === id); return [n.style.x, n.style.y]; }
     getElementRenderBounds() { return { min: [0, 0], max: [500, 300] }; }
-    getZoom() { return 1; }
+    getZoom() { return this.zoom; }
     getViewportByCanvas() { return [0, 0]; }
     async zoomTo() {}
     async translateTo() {}
@@ -71,6 +74,33 @@ afterEach(() => {
 });
 
 describe('G6 lifecycle and incremental state', () => {
+  it('renders constellation only for the requested scene and reveals labels/arrows without rebuilding', async () => {
+    const data = { ...scene(), appearance: 'orbit' as const };
+    data.edges[0]!.reverseCount = 2;
+    await runtime.update(data, new Set(), new Set());
+    const graph = harness.graphs[0];
+    expect(graph.options.node.type(graph.data.nodes[0])).toBe('circle');
+    expect(graph.data.nodes[0].style.label).toBe(false);
+    expect(graph.data.edges[0].style).toMatchObject({ endArrow: false, startArrow: false });
+    graph.events.get('node:pointerenter')({ target: { id: 'a' } });
+    await runtime.settled();
+    expect(graph.updateNodeData).toHaveBeenLastCalledWith([{ id: 'a', style: { label: true } }]);
+    expect(graph.updateEdgeData).toHaveBeenLastCalledWith([{ id: 'ab', style: { endArrow: true, startArrow: true } }]);
+    graph.events.get('node:pointerleave')();
+    await runtime.settled();
+    expect(graph.updateEdgeData).toHaveBeenLastCalledWith([{ id: 'ab', style: { endArrow: false, startArrow: false } }]);
+    graph.zoom = 2;
+    graph.events.get('aftertransform')();
+    await runtime.settled();
+    expect(graph.updateNodeData).toHaveBeenLastCalledWith(data.nodes.map(({id}) => ({ id, style: { label: true } })));
+    await runtime.update({ ...data, showArrows: true }, new Set(), new Set());
+    expect(graph.updateEdgeData).toHaveBeenLastCalledWith([{ id: 'ab', style: { endArrow: true, startArrow: true } }]);
+    expect(graph.render).toHaveBeenCalledOnce();
+    await runtime.update(scene(), new Set(), new Set());
+    expect(graph.options.node.type(graph.data.nodes[0])).toBe('rect');
+    expect(graph.data.nodes[0].style.label).toBe(true);
+  });
+
   it('selection, hover labels and path highlighting do not rerender geometry', async () => {
     const data = scene();
     await runtime.update(data, new Set(), new Set());

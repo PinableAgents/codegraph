@@ -12,9 +12,9 @@ export async function calculateRenderLayout(kind: string, payload: unknown, opti
   if (kind === 'relationships') {
     const data = payload as import('./relationship-layout').RelationshipLayoutInput;
     assertBudget(graphBudget(data.nodes.length, data.relations.length));
-    if (!['force', 'concentric', 'circular'].includes(String(options.mode))) throw new Error('Unknown relationship layout');
+    if (!['force', 'concentric', 'circular', 'orbit'].includes(String(options.mode))) throw new Error('Unknown relationship layout');
     const { layoutRelationships } = await import('./relationship-layout');
-    return layoutRelationships(data, options.mode as 'force' | 'concentric' | 'circular');
+    return layoutRelationships(data, options.mode as Exclude<import('./relationship-layout').RelationshipLayout, 'default'>);
   }
   const result = calculateLayout(kind, payload, options);
   if (kind === 'map') {

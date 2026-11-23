@@ -5,6 +5,7 @@ import { endCapText } from './flow-model';
 /** Standalone SVG from the current rendered geometry, including HTML card source text. */
 export function snapshotSvg(snapshot: GraphSnapshot, scale = 1): string {
   const { nodes, edges } = snapshot;
+  const orbit = snapshot.appearance === 'orbit';
   const minX = (snapshot.bounds?.x ?? Math.min(0, ...nodes.map(n => n.x))) - 32, minY = (snapshot.bounds?.y ?? Math.min(0, ...nodes.map(n => n.y))) - 48;
   const width = snapshot.bounds ? snapshot.bounds.width+64 : Math.max(320, ...nodes.map(n => n.x + n.width)) - minX + 32;
   const height = snapshot.bounds ? snapshot.bounds.height+96 : Math.max(160, ...nodes.map(n => n.y + n.height)) - minY + 32;
@@ -12,13 +13,20 @@ export function snapshotSvg(snapshot: GraphSnapshot, scale = 1): string {
   for(const group of snapshot.groups){const b=group.bounds;if(b)parts.push(`<rect x="${b.x}" y="${b.y}" width="${b.width}" height="${b.height}" rx="6" fill="#f4f7fa" stroke="#91a4b4" stroke-dasharray="3 3"/><text x="${b.x+10}" y="${b.y+17}" font-family="sans-serif" font-size="12">${esc(group.label)} · ${group.members.length}</text>`);}
   for (const edge of edges) {
     if (!edge.path) continue;
-    parts.push(`<path d="${esc(edge.path)}" fill="none" stroke="${edge.hot ? '#ad6500' : '#466783'}" stroke-width="${edge.hot ? 2.5 : edge.width}"${edge.dashed ? ` stroke-dasharray="${(edge.dashPattern??[5,3]).join(' ')}"` : ''}${edge.arrow !== false ? ' marker-end="url(#arrow)"' : ''}${edge.reverseCount ? ' marker-start="url(#arrow)"' : ''}/>`);
+    const arrows = !orbit || edge.displayArrows === true;
+    parts.push(`<path d="${esc(edge.path)}" fill="none" stroke="${edge.hot ? '#ad6500' : '#466783'}" stroke-width="${edge.hot ? (orbit ? 1.5 : 2.5) : orbit ? .8 : edge.width}"${edge.dashed ? ` stroke-dasharray="${(edge.dashPattern??[5,3]).join(' ')}"` : ''}${arrows && edge.arrow !== false ? ' marker-end="url(#arrow)"' : ''}${arrows && edge.reverseCount ? ' marker-start="url(#arrow)"' : ''}/>`);
     if (edge.label && (edge.hot || edge.alwaysLabel)) {
       const a = nodes.find(n => n.id === edge.source), b = nodes.find(n => n.id === edge.target);
       if (a && b) edge.label.split('\n').forEach((line, i) => parts.push(`<text x="${edge.labelPoint?.x ?? (a.x + a.width + b.x) / 2}" y="${(edge.labelPoint?.y ?? (a.y + b.y) / 2 - 10) + i * 13}" text-anchor="middle" font-family="monospace" font-size="11" fill="#34485b">${esc(line)}</text>`));
     }
   }
   for (const node of nodes) {
+    if (orbit && node.kind !== 'group') {
+      const x = node.x + node.width / 2, y = node.y + node.height / 2;
+      parts.push(`<circle cx="${x}" cy="${y}" r="${node.width / 2}" fill="${node.selected ? '#ad6500' : '#172b3b'}"><title>${esc(node.label)}</title></circle>`);
+      if (node.selected) parts.push(`<text x="${x}" y="${node.y + node.height + 14}" text-anchor="middle" font-family="monospace" font-size="11" fill="#172b3b">${esc(node.label)}</text>`);
+      continue;
+    }
     const color = node.selected ? '#ad6500' : '#91a4b4';
     parts.push(`<g transform="translate(${node.x},${node.y})">${node.kind === 'region' || node.kind === 'decision' ? '' : `<rect width="${node.width}" height="${node.height}" rx="4" fill="#fff" stroke="${color}" stroke-width="${node.selected ? 2.5 : 1}"${node.dashed ? ' stroke-dasharray="5 3"' : ''}/>`}<text x="10" y="18" font-family="monospace" font-size="13" fill="#172b3b">${esc((node.cyclic ? '↻ ' : '') + node.label)}</text>`);
     if (node.sub) parts.push(`<text x="10" y="33" font-family="sans-serif" font-size="11" fill="#526475">${esc(node.sub)}</text>`);
