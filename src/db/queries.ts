@@ -503,6 +503,7 @@ export class QueryBuilder {
     getNodesByFileAndName?: NodeStatement;
     getNodeIdentitiesByFile?: SqliteStatement;
     getFileNodesByNamePrefix?: SqliteStatement;
+    getPhpDocumentRootIncludes?: SqliteStatement;
     getNodesByQualifiedNameExact?: NodeStatement;
     getNodesByLowerName?: NodeStatement;
     hasFilesOfLanguage?: SqliteStatement;
@@ -1829,6 +1830,20 @@ export class QueryBuilder {
     }
     const rows = this.stmts.getNodesByNamePrefix.all(prefix, prefix + '￿', limit) as NodeRow[];
     return rows.map(rowToNode);
+  }
+
+  /**
+   * The PHP includes built from `$_SERVER['DOCUMENT_ROOT']` (#3298): the import
+   * nodes the extractors name `prefix` + the path appended to the web root,
+   * each with its file. By index range scan, ordered for a stable reading.
+   */
+  getPhpDocumentRootIncludes(prefix: string): Array<{ filePath: string; name: string }> {
+    if (!this.stmts.getPhpDocumentRootIncludes) {
+      this.stmts.getPhpDocumentRootIncludes = this.db.prepare(
+        "SELECT file_path AS filePath, name FROM nodes WHERE name >= ? AND name < ? AND kind = 'import' AND language = 'php' ORDER BY name, file_path"
+      );
+    }
+    return this.stmts.getPhpDocumentRootIncludes.all(prefix, prefix + '￿') as Array<{ filePath: string; name: string }>;
   }
 
   /** File nodes whose basename starts with `prefix`, without a result cap. */
@@ -3687,6 +3702,76 @@ export class QueryBuilder {
   }
 
   /**
+   * The references named `tail` that the resolver gave up on — `h.ServeHTTP(…)`
+   * through an interface, `x.update()` on a receiver it could not type — at most
+   * `limit` of them in file and line order, and how many there are in all.
+   * Excludes `kinds` (a failed import of a same-named package export is someone
+   * else's symbol). One probe of `idx_unresolved_failed_tail` each.
+   */
+  getFailedReferencesByTail(
+    tail: string,
+    excludeKinds: readonly string[],
+    limit: number,
+  ): { refs: UnresolvedReference[]; total: number } {
+    if (!tail) return { refs: [], total: 0 };
+    const kindFilter = excludeKinds.length > 0
+      ? ` AND reference_kind NOT IN (${excludeKinds.map(() => '?').join(',')})`
+      : '';
+    const where = `WHERE status = 'failed' AND name_tail = ?${kindFilter}`;
+    const total = (this.db
+      .prepare(`SELECT COUNT(*) AS n FROM unresolved_refs ${where}`)
+      .get(tail, ...excludeKinds) as { n: number }).n;
+    if (total === 0 || limit <= 0) return { refs: [], total };
+    const rows = this.db
+      .prepare(`SELECT * FROM unresolved_refs ${where} ORDER BY file_path, line, col LIMIT ?`)
+      .all(tail, ...excludeKinds, limit) as UnresolvedRefRow[];
+    return {
+      total,
+      refs: rows.map((row) => ({
+        fromNodeId: row.from_node_id,
+        referenceName: row.reference_name,
+        referenceKind: row.reference_kind as EdgeKind,
+        line: row.line,
+        column: row.col,
+        filePath: row.file_path,
+        language: row.language as Language,
+        rowId: row.id,
+      })),
+    };
+  }
+
+  /**
+   * The references the resolver gave up on that are written exactly as one of
+   * `names` (`binding.Query`), at most `limit`, in file and line order. One
+   * probe of `idx_unresolved_name` per chunk.
+   */
+  getFailedReferencesByNames(names: readonly string[], limit: number): UnresolvedReference[] {
+    const unique = [...new Set(names)].filter((n) => n.length > 0);
+    if (unique.length === 0 || limit <= 0) return [];
+    const rows: UnresolvedRefRow[] = [];
+    for (let i = 0; i < unique.length && rows.length < limit; i += SQLITE_PARAM_CHUNK_SIZE) {
+      const chunk = unique.slice(i, i + SQLITE_PARAM_CHUNK_SIZE);
+      const placeholders = chunk.map(() => '?').join(',');
+      rows.push(...this.db
+        .prepare(
+          `SELECT * FROM unresolved_refs WHERE reference_name IN (${placeholders}) AND status = 'failed'
+            ORDER BY file_path, line, col LIMIT ?`
+        )
+        .all(...chunk, limit - rows.length) as UnresolvedRefRow[]);
+    }
+    return rows.map((row) => ({
+      fromNodeId: row.from_node_id,
+      referenceName: row.reference_name,
+      referenceKind: row.reference_kind as EdgeKind,
+      line: row.line,
+      column: row.col,
+      filePath: row.file_path,
+      language: row.language as Language,
+      rowId: row.id,
+    }));
+  }
+
+  /**
    * References recorded against a symbol that never resolved to a node — the
    * calls and type mentions that leave the index (a third-party package, a
    * runtime builtin, a language construct extraction doesn't model).
@@ -3786,15 +3871,22 @@ export class QueryBuilder {
    * decorates — exactly what {@link GraphTraverser.getImpactRadius} traverses.
    * `contains` is excluded: a parent containing a symbol does not *depend* on
    * it. One indexed query (idx_nodes_file_path + idx_edges_target_kind).
+   *
+   * `skipTiers` leaves out the edges the tier pass links across a process
+   * boundary (their metadata carries `tier`): a client's HTTP call onto its
+   * server's route, a queue job onto its consumer, an event onto its handler.
+   * Test selection wants that: a frontend's tests mock the backend they call,
+   * so a backend change doesn't affect them (#3320).
    */
-  getDependentFilePaths(filePath: string): string[] {
+  getDependentFilePaths(filePath: string, opts: { skipTiers?: boolean } = {}): string[] {
     const sql = `SELECT DISTINCT src.file_path AS fp
       FROM edges e
       JOIN nodes tgt ON tgt.id = e.target
       JOIN nodes src ON src.id = e.source
       WHERE tgt.file_path = ?
         AND e.kind != 'contains'
-        AND src.file_path != ?`;
+        AND src.file_path != ?${opts.skipTiers ? `
+        AND (e.metadata IS NULL OR json_extract(e.metadata, '$.tier') IS NULL)` : ''}`;
     const rows = this.db.prepare(sql).all(filePath, filePath) as Array<{ fp: string }>;
     return rows.map((r) => r.fp);
   }
