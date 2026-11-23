@@ -1,7 +1,7 @@
 import { CircularLayout, ConcentricLayout, D3ForceLayout } from '@antv/layout';
 import type { GraphRelation, Point, SceneGroup } from './graph-scene';
 
-export type RelationshipLayout = 'default' | 'force' | 'concentric' | 'circular';
+export type RelationshipLayout = 'default' | 'force' | 'concentric' | 'circular' | 'orbit';
 export type LayoutBox = { id: string; width: number; height: number };
 export interface RelationshipLayoutInput {
   nodes: LayoutBox[];
@@ -65,6 +65,33 @@ async function place(boxes: LayoutBox[], relations: GraphRelation[], mode: Exclu
   }
   const diameter = Math.max(...nodes.map(n => Math.hypot(n.width, n.height)));
   const edges = [...links.values()].sort(compare);
+  if (mode === 'orbit') {
+    // Degree-ranked concentric rings keep connected hubs central and fit
+    // large groups without depending on simulation settling or live timers.
+    const degree = new Map(nodes.map(node => [node.id, 0]));
+    for (const edge of edges) {
+      degree.set(edge.source, degree.get(edge.source)! + 1);
+      degree.set(edge.target, degree.get(edge.target)! + 1);
+    }
+    const ranked = nodes.sort((a, b) => degree.get(b.id)! - degree.get(a.id)! || compare(a, b));
+    const spacing = diameter + 16;
+    const centers: LayoutPositions = { [ranked[0]!.id]: { x: 0, y: 0 } };
+    for (let ring = 1, next = 1; next < ranked.length; ring++) {
+      const radius = ring * spacing;
+      const capacity = Math.floor(Math.PI / Math.asin(spacing / (2 * radius)));
+      const count = Math.min(capacity, ranked.length - next);
+      for (let index = 0; index < count; index++, next++) {
+        const angle = (index / count) * Math.PI * 2 + ring * Math.PI / 9;
+        centers[ranked[next]!.id] = { x: radius * Math.cos(angle), y: radius * Math.sin(angle) };
+      }
+    }
+    const left = Math.min(...ranked.map(node => centers[node.id]!.x - node.width / 2));
+    const top = Math.min(...ranked.map(node => centers[node.id]!.y - node.height / 2));
+    return Object.fromEntries(ranked.map(node => [node.id, {
+      x: centers[node.id]!.x - node.width / 2 - left + 48,
+      y: centers[node.id]!.y - node.height / 2 - top + 48,
+    }]));
+  }
   const algorithm = mode === 'circular'
     ? new CircularLayout({ center: [0, 0], radius: (diameter + 64) / (2 * Math.sin(Math.PI / nodes.length)), ordering: null, startAngle: -Math.PI / 2, endAngle: Math.PI * 1.5 })
     : mode === 'concentric'

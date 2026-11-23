@@ -37,7 +37,7 @@
   }
 
   let { root, depth, tests }: Props = $props();
-  let relationshipLayout = $state<RelationshipLayout>('default');
+  let relationshipLayout = $state<RelationshipLayout>('orbit');
 
   let visibleCounts = $state<{nodes:number;edges:number}|null>(null);
   let payload = $state<WireMapPayload | null>(null);
@@ -103,7 +103,7 @@
   let layout = $state<MapLayout | null>(null);
   let positions = $state<Record<string, { x: number; y: number }>>({});
   let flowPlaying = $state(false);
-  let edgeStyle = $state<MapEdgeStyle>('curve');
+  let edgeStyle = $state<MapEdgeStyle>('straight');
   let fitRequest = $state<object | null>(null);
   let compactRequest = $state.raw<{ layout: MapLayout; direction: string; input: CompactMapInput } | null>(null);
   const manuallyPlaced = $derived(Object.keys(positions).length > 0);
@@ -241,7 +241,7 @@
   focusDirection = restored.focusDirection ?? 'both';
   positions = restored.positions ?? {};
   flowPlaying = restored.flowPlaying ?? false;
-  edgeStyle = restored.edgeStyle === undefined || restored.edgeStyle === 'curve' ? 'curve' : 'straight';
+  edgeStyle = restored.edgeStyle === 'curve' ? 'curve' : 'straight';
   $effect(() => saveGraphHistory(stateKey, { selected, minWeight, focusOnly, focusDirection, positions, flowPlaying, edgeStyle }));
 
   $effect(() => {
@@ -271,7 +271,7 @@
   <label>{graphText('连线', 'Edges')} <select use:selectDropdown aria-label={graphText('连线样式', 'Edge style')} bind:value={edgeStyle}><option value="curve">{graphText('曲线', 'Curve')}</option><option value="straight">{graphText('直线', 'Straight')}</option></select></label>
   <button disabled={!focusOnly || !selected || !layout || !!compactRequest} title={graphText('选中节点并开启只看聚焦后，重新排列当前可见节点，缩短长距离连线。', 'Select a node and enable Focus only to arrange visible nodes closer together.')} onclick={compactVisible}>{compactRequest ? graphText('排列中…', 'Arranging…') : graphText('紧凑排列', 'Compact layout')}</button>
   <button disabled={!layout} aria-pressed={flowPlaying} onclick={() => flowPlaying = !flowPlaying}>{flowPlaying ? graphText('暂停流向', 'Pause flow') : graphText('播放流向', 'Play flow')}</button>
-  <button disabled={!manuallyPlaced && relationshipLayout === 'default'} onclick={() => { compactRequest = null; positions = {}; relationshipLayout = 'default'; fitRequest = {}; }}>{graphText('恢复自动布局', 'Reset layout')}</button>
+  <button disabled={!manuallyPlaced && relationshipLayout === 'default'} onclick={() => { compactRequest = null; positions = {}; relationshipLayout = 'default'; fitRequest = {}; }}>{graphText('恢复分层布局', 'Restore hierarchical layout')}</button>
 </div>
 <p class="compact-note">{graphText('拖动节点整理链路；Alt + 方向键微调。箭头 A → B 表示 A 调用或依赖 B，动画不代表运行时数据。', 'Drag nodes to arrange links; use Alt + arrow keys to nudge. A → B means A calls or depends on B; animation does not represent runtime data.')} {manuallyPlaced ? graphText('当前为手动排列。', 'Manually arranged.') : graphText('当前为自动布局。', 'Automatic layout.')}{#if flowPlaying && visibleEdges.length > 200} {graphText('仅播放前 200 条关系；选中节点可聚焦局部流向。', 'Playing the first 200 relationships; select a node to focus the flow.')}{/if}</p>
 <div class="mapview">

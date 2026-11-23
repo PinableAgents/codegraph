@@ -2,6 +2,7 @@ import { Graph, BaseEdge, Cubic, ExtensionCategory, register, type GraphData, ty
 import { mount, unmount } from 'svelte';
 import type { GraphController, GraphScene, GraphSnapshot, SceneNode, Viewport } from './graph-scene';
 import { snapshotSvg } from './graph-snapshot';
+import { orbitLabelZoom, orbitVisibleLabels } from './map-orbit';
 
 /** Extensions capture the actual routed path for export, rather than redrawing old model curves. */
 class RoutedEdge extends Cubic {
@@ -69,6 +70,9 @@ export class G6Runtime implements GraphController {
   private highlighted = new Set<string>();
   private states = new Map<string, string>();
   private edgeLabels = new Map<string,string>();
+  private orbitNodeLabels = new Map<string, boolean>();
+  private orbitArrows = new Map<string, boolean>();
+  private orbitZoomLabels = false;
   private edgeVisibility = new Map<string, boolean>();
   private edgeAvoidance = new Map<string, string>();
   private observer: ResizeObserver;
@@ -78,12 +82,29 @@ export class G6Runtime implements GraphController {
   private timer: ReturnType<typeof setInterval> | undefined;
   private playing = false;
   private dashOffset = 0;
+  private nodeStates() {
+    return {
+      selected: { stroke: this.colors.accent, lineWidth: 2.5, halo: true, haloLineWidth: 6, haloStroke: this.colors.accent, haloOpacity: .2 },
+      active: { stroke: this.colors.accent, lineWidth: 2.5 }, dimmed: { opacity: .25 },
+      'orbit-selected': { fill: this.colors.accent, stroke: this.colors.accent, lineWidth: 1, halo: true, haloLineWidth: 6, haloStroke: this.colors.accent, haloOpacity: .23 },
+      'orbit-active': { fill: this.colors.ink, stroke: this.colors.accent, lineWidth: 1.5 }, 'orbit-dimmed': { opacity: .19 },
+    };
+  }
+  private edgeStates() {
+    return {
+      active: { stroke: this.colors.accent, lineWidth: 2.5, opacity: 1, label: true },
+      pointed: { stroke: this.colors.accent, lineWidth: 3.5, opacity: 1, label: true }, dimmed: { opacity: .12 },
+      'orbit-active': { stroke: this.colors.accent, lineWidth: 1.5, opacity: .95 },
+      'orbit-pointed': { stroke: this.colors.accent, lineWidth: 2, opacity: 1, label: true },
+      'orbit-dimmed': { opacity: .08 },
+    };
+  }
   private themeChanged = () => {
     const previous = JSON.stringify(this.colors); this.readTheme();
     if (previous !== JSON.stringify(this.colors)) {
       const options=this.graph.getOptions();
-      this.graph.setNode({...options.node,state:{selected:{stroke:this.colors.accent,lineWidth:2.5,halo:true,haloLineWidth:6,haloStroke:this.colors.accent,haloOpacity:.2},active:{stroke:this.colors.accent,lineWidth:2.5},dimmed:{opacity:.25}}});
-      this.graph.setEdge({...options.edge,state:{active:{stroke:this.colors.accent,lineWidth:2.5,opacity:1,label:true},pointed:{stroke:this.colors.accent,lineWidth:3.5,opacity:1,label:true},dimmed:{opacity:.12}}});
+      this.graph.setNode({ ...options.node, state: this.nodeStates() });
+      this.graph.setEdge({ ...options.edge, state: this.edgeStates() });
       this.geometry = ''; void this.update(this.scene, this.collapsed, this.highlighted);
     }
   };
@@ -92,10 +113,8 @@ export class G6Runtime implements GraphController {
     this.readTheme();
     this.graph = new Graph({ container, width: Math.max(1, container.clientWidth), height: Math.max(1, container.clientHeight),
       animation: false, padding: [90, 36, 50, 36], zoomRange: [.005, 3],
-      node: { type: datum => datum.data?.html ? 'html' : 'rect',
-        state: { selected: { stroke: this.colors.accent, lineWidth: 2.5,halo:true,haloLineWidth:6,haloStroke:this.colors.accent,haloOpacity:.2 }, active: { stroke: this.colors.accent, lineWidth: 2.5 }, dimmed: { opacity: .25 } } },
-      edge: { type: datum => datum.data?.semantic ? 'codegraph-semantic' : 'codegraph-routed',
-        state: { active: { stroke: this.colors.accent, lineWidth: 2.5, opacity: 1, label: true }, pointed: { stroke: this.colors.accent, lineWidth: 3.5, opacity: 1, label: true }, dimmed: { opacity: .12 } } },
+      node: { type: datum => datum.data?.html ? 'html' : datum.data?.orbit ? 'circle' : 'rect', state: this.nodeStates() },
+      edge: { type: datum => datum.data?.semantic ? 'codegraph-semantic' : 'codegraph-routed', state: this.edgeStates() },
       combo: { type: 'rect', style: { padding: [32, 20, 20, 20], radius: 6, collapsedSize: [200, 48], labelPlacement: 'top', collapsedMarker: false } },
       behaviors: ['drag-canvas', 'zoom-canvas', { type: 'drag-element', animation: false, shadow: true,
         enable: (event: any) => !!this.scene.nodes.find(n => n.id === event.target.id)?.draggable,
@@ -119,7 +138,16 @@ export class G6Runtime implements GraphController {
     this.graph.on('edge:pointerleave', () => {
       this.scene.edges.find(e => e.id === this.hovered)?.onHover?.(null); this.hovered = null; this.enqueueStates();
     });
-    this.graph.on('aftertransform', () => { if (!this.closed && this.rendered) {this.container.dataset.graphZoom=String(this.graph.getZoom());this.events.viewport(this.viewport());} });
+    this.graph.on('aftertransform', () => {
+      if (this.closed || !this.rendered) return;
+      const zoom = this.graph.getZoom(), labels = zoom >= orbitLabelZoom;
+      this.container.dataset.graphZoom = String(zoom);
+      if (this.orbitZoomLabels !== labels) {
+        this.orbitZoomLabels = labels;
+        if (this.scene.appearance === 'orbit') this.enqueueStates();
+      }
+      this.events.viewport(this.viewport());
+    });
     this.observer = new ResizeObserver(() => { if (!this.closed) this.graph.setSize(Math.max(1, container.clientWidth), Math.max(1, container.clientHeight)); });
     this.observer.observe(container);
     this.themeObserver = new MutationObserver(this.themeChanged);
@@ -143,13 +171,14 @@ export class G6Runtime implements GraphController {
       this.scene.edges.find(e => e.id === this.hovered)?.onHover?.(null);
       this.hovered = null;
     }
+    if (this.hoveredNode && !scene.nodes.some(n => n.id === this.hoveredNode)) this.hoveredNode = null;
     this.scene = scene; this.collapsed = new Set(collapsed); this.highlighted = new Set(highlighted);
-    const geometry = JSON.stringify([scene.nodes.map(n => [n.id, n.x, n.y, n.width, n.height, n.label, n.sub, n.group, n.dashed,n.cyclic]),
+    const geometry = JSON.stringify([scene.appearance, scene.nodes.map(n => [n.id, n.x, n.y, n.width, n.height, n.label, n.sub, n.group, n.dashed,n.cyclic]),
       scene.edges.map(e => [e.id, e.source, e.target, e.path, e.points, e.reverseCount,e.straight]), scene.groups, [...collapsed]]);
     return this.enqueue(async () => {
       if (generation !== this.generation) return;
       if (geometry !== this.geometry) {
-        const started = performance.now(); this.paths.clear(); this.labelPoints.clear(); this.states.clear(); this.edgeLabels.clear(); this.edgeVisibility.clear(); this.edgeAvoidance.clear();
+        const started = performance.now(); this.paths.clear(); this.labelPoints.clear(); this.states.clear(); this.edgeLabels.clear(); this.edgeVisibility.clear(); this.edgeAvoidance.clear(); this.orbitNodeLabels.clear(); this.orbitArrows.clear();
         const ids = new Set(scene.nodes.map(n => n.id));
         for (const [id, entry] of this.mounts) if (!ids.has(id)) { void unmount(entry.instance); this.mounts.delete(id); }
         const data = this.data(scene);
@@ -208,25 +237,30 @@ export class G6Runtime implements GraphController {
     }
   }
   private data(scene: GraphScene): GraphData {
-    const nodes: NodeData[] = scene.nodes.map(n => ({ id: n.id, combo: n.group, data: { kind: n.kind, html: !!n.component }, style: {
+    const orbit = scene.appearance === 'orbit';
+    const nodes: NodeData[] = scene.nodes.map(n => ({ id: n.id, combo: n.group, data: { kind: n.kind, html: !!n.component, orbit }, style: {
       x: n.x + n.width / 2, y: n.y + n.height / 2, size: [n.width, n.height], radius: 4,
-      fill: ['region', 'decision'].includes(n.kind) ? 'transparent' : this.colors.paper,
-      stroke: ['region', 'decision'].includes(n.kind) ? 'transparent' : this.colors.line,
+      fill: orbit ? this.colors.ink : ['region', 'decision'].includes(n.kind) ? 'transparent' : this.colors.paper,
+      stroke: orbit || ['region', 'decision'].includes(n.kind) ? 'transparent' : this.colors.line,
       // G6 merges shape attributes on update. Supply the resting opacity so
       // clearing the dimmed state restores the already-rendered native node.
       ...(scene.kind === 'map' || scene.kind === 'screens' ? { opacity: 1 } : {}),
       lineWidth: 1.8, lineDash: n.dashed ? [5, 3] : [],
-      labelText: `${n.entry ? '● ' : ''}${n.cyclic?'↻ ':''}${n.label}${n.sub ? `\n${n.sub}` : ''}`, labelPlacement: 'center',
-      labelFontFamily: 'monospace', labelFontSize: n.kind === 'fork' ? 10 : 12, labelLineHeight: 16,
+      labelText: orbit ? n.label : `${n.entry ? '● ' : ''}${n.cyclic ? '↻ ' : ''}${n.label}${n.sub ? `\n${n.sub}` : ''}`,
+      labelPlacement: orbit ? 'bottom' : 'center',
+      labelFontFamily: 'monospace', labelFontSize: orbit ? 11 : n.kind === 'fork' ? 10 : 12, labelLineHeight: 16,
       labelFill: this.colors.ink, labelWordWrap: false,
+      // Supply the resting label value on both modes: G6 merges element data across a layout switch.
+      label: !orbit,
+      labelOffsetY: orbit ? 4 : 0, labelBackground: orbit, labelBackgroundFill: this.colors.paper,
       ...(n.component ? { innerHTML: this.html(n), dx: -n.width / 2, dy: -n.height / 2 } : {}),
     } }));
     const edges: EdgeData[] = scene.edges.map(e => ({ id: e.id, source: e.source, target: e.target, data: { semantic: !!e.path }, style: {
-      stroke: this.colors.edge, lineWidth: e.width, opacity: .65,
+      stroke: orbit ? this.colors.sub : this.colors.edge, lineWidth: orbit ? Math.min(.95, .48 + e.width * .2) : e.width, opacity: orbit ? .36 : .65,
       visibility: e.hidden ? 'hidden' : 'visible',
       label: !!e.alwaysLabel, labelText: e.label, labelFill: this.colors.sub, labelFontSize: 11, labelLineHeight: 13,
       labelBackground: true, labelBackgroundFill: this.colors.paper, labelAutoRotate:false,
-      lineDash: e.dashPattern ?? (e.dashed ? [5, 3] : []), endArrow: e.arrow !== false, startArrow: !!e.reverseCount,
+      lineDash: e.dashPattern ?? (e.dashed ? [5, 3] : []), endArrow: (!orbit || scene.showArrows === true) && e.arrow !== false, startArrow: (!orbit || scene.showArrows === true) && !!e.reverseCount,
       endArrowSize: 7, startArrowSize: 7, radius: 6,
       curvePosition: [0.3, 0.7], curveOffset: [32, 32],
       routeEpoch: this.generation, straight: e.straight,
@@ -238,11 +272,12 @@ export class G6Runtime implements GraphController {
       captureLabel: (style:any) => {const t=style.transform?.find((p:any[])=>p[0]==='translate');this.labelPoints.set(e.id,{x:t?.[1]??style.x??0,y:t?.[2]??style.y??0});},
     } }));
     return { nodes, edges, combos: scene.groups.map(g => {
-      const accent = groupAccent(scene.kind, g.id);
+      const quiet = orbit && !this.collapsed.has(g.id);
+      const accent = quiet ? undefined : groupAccent(scene.kind, g.id);
       return { id: g.id, data: {}, style: {
         collapsed: this.collapsed.has(g.id), labelText: `${g.label} · ${g.members.length}`, labelFill: this.colors.sub,
         padding: this.collapsed.has(g.id) ? 0 : [32,20,20,20], labelPlacement: this.collapsed.has(g.id) ? 'center' : 'top',
-        fill: accent ?? this.colors.group, fillOpacity: accent ? .18 : .35, stroke: this.colors.line, lineDash: [3, 3],
+        label: !quiet, fill: quiet ? 'transparent' : accent ?? this.colors.group, fillOpacity: accent ? .18 : .35, stroke: quiet ? 'transparent' : this.colors.line, lineDash: [3, 3],
       } };
     }) };
   }
@@ -251,7 +286,10 @@ export class G6Runtime implements GraphController {
     const labels:Partial<EdgeData>[]=[];
     const visibility:Partial<EdgeData>[]=[];
     const routes:Partial<EdgeData>[]=[];
+    const nodeLabels: (Pick<NodeData, 'id'> & Partial<NodeData>)[] = [], arrowStyles: Partial<EdgeData>[] = [];
+    const orbit = this.scene.appearance === 'orbit';
     const pinned = (this.scene.kind === 'map' || this.scene.kind === 'screens') && this.scene.nodes.some(n => n.selected);
+    const visibleOrbitLabels = orbit ? orbitVisibleLabels(this.scene.nodes, this.orbitZoomLabels, this.hoveredNode) : null;
     const relatedNodes = new Set<string>();
     const relatedEdges = new Set<string>();
     if (this.hoveredNode) relatedNodes.add(this.hoveredNode);
@@ -262,8 +300,16 @@ export class G6Runtime implements GraphController {
       }
     }
     const hovering = !pinned && relatedNodes.size > 0;
+    const state = (name: string) => orbit ? `orbit-${name}` : name;
     for (const n of this.scene.nodes) {
-      const next = n.selected ? ['selected'] : this.highlighted.has(n.id) || (hovering && relatedNodes.has(n.id)) ? ['active'] : n.dimmed || (hovering && !n.decorative) ? ['dimmed'] : [];
+      const next = n.selected ? [state('selected')] : this.highlighted.has(n.id) || (hovering && relatedNodes.has(n.id)) ? [state('active')] : n.dimmed || (hovering && !n.decorative) ? [state('dimmed')] : [];
+      if (visibleOrbitLabels) {
+        const visible = visibleOrbitLabels.has(n.id);
+        if (this.orbitNodeLabels.get(n.id) !== visible) {
+          this.orbitNodeLabels.set(n.id, visible);
+          nodeLabels.push({ id: n.id, style: { label: visible } });
+        }
+      }
       if (this.states.get(n.id) !== next.join()) { this.states.set(n.id, next.join()); changes[n.id] = next; }
       const html = this.mounts.get(n.id)?.element;
       if (html) {
@@ -289,13 +335,22 @@ export class G6Runtime implements GraphController {
       }
       const active = !hidden && (e.hot || (hovering && relatedEdges.has(e.id)) || e.originalIds.some(id => this.highlighted.has(id)));
       const pointed = pinned && e.hot && (e.pointed || e.id === this.hovered);
-      const next = active ? [pointed ? 'pointed' : 'active'] : e.dimmed || hovering ? ['dimmed'] : [];
+      const next = active ? [state(pointed || (orbit && e.id === this.hovered) ? 'pointed' : 'active')] : e.dimmed || hovering ? [state('dimmed')] : [];
+      if (orbit) {
+        const arrows = this.scene.showArrows === true || active || e.flowing === true;
+        if (this.orbitArrows.get(e.id) !== arrows) {
+          this.orbitArrows.set(e.id, arrows);
+          arrowStyles.push({ id: e.id, style: { endArrow: arrows && e.arrow !== false, startArrow: arrows && !!e.reverseCount } });
+        }
+      }
       if (this.states.get(e.id) !== next.join()) { this.states.set(e.id, next.join()); changes[e.id] = next; }
     }
     if(labels.length) this.graph.updateEdgeData(labels);
     if(visibility.length) this.graph.updateEdgeData(visibility);
     if(routes.length) this.graph.updateEdgeData(routes);
-    if(labels.length || visibility.length || routes.length) await this.graph.draw();
+    if (nodeLabels.length) this.graph.updateNodeData(nodeLabels);
+    if (arrowStyles.length) this.graph.updateEdgeData(arrowStyles);
+    if(labels.length || visibility.length || routes.length || nodeLabels.length || arrowStyles.length) await this.graph.draw();
     this.container.dataset.graphEdges = String(this.scene.edges.filter(e => !e.hidden).length);
     if (Object.keys(changes).length) await this.graph.setElementState(changes, false);
   }
@@ -338,8 +393,8 @@ export class G6Runtime implements GraphController {
     const boundsOf=(id:string)=>{const b=this.graph.getElementRenderBounds(id);return {x:b.min[0],y:b.min[1],width:b.max[0]-b.min[0],height:b.max[1]-b.min[1]};};
     const boxes=[...nodes.map(n=>boundsOf(n.id)),...scene.edges.filter(e=>!e.hidden).map(e=>boundsOf(e.id)),...scene.groups.map(g=>boundsOf(g.id))];
     const x=Math.min(0,...boxes.map(b=>b.x)),y=Math.min(0,...boxes.map(b=>b.y));
-    return { nodes, bounds:{x,y,width:Math.max(0,...boxes.map(b=>b.x+b.width))-x,height:Math.max(0,...boxes.map(b=>b.y+b.height))-y},
-      groups: scene.groups.filter(g=>!this.collapsed.has(g.id)).map(g=>({...g,bounds:boundsOf(g.id)})), edges: scene.edges.filter(e=>!e.hidden).map(e => ({ ...e, labelPoint:this.labelPoints.get(e.id),hot: e.hot || this.hovered === e.id || e.originalIds.some(id => this.highlighted.has(id)), path: this.paths.get(e.id) ?? e.path })) };
+    return { nodes, appearance: scene.appearance, bounds:{x,y,width:Math.max(0,...boxes.map(b=>b.x+b.width))-x,height:Math.max(0,...boxes.map(b=>b.y+b.height))-y},
+      groups: scene.appearance === 'orbit' ? [] : scene.groups.filter(g=>!this.collapsed.has(g.id)).map(g=>({...g,bounds:boundsOf(g.id)})), edges: scene.edges.filter(e=>!e.hidden).map(e => ({ ...e, displayArrows: this.orbitArrows.get(e.id), labelPoint:this.labelPoints.get(e.id),hot: e.hot || this.hovered === e.id || e.originalIds.some(id => this.highlighted.has(id)), path: this.paths.get(e.id) ?? e.path })) };
   }
   exportSvg(scale: number) { return snapshotSvg(this.snapshot(), scale); }
   destroy() {
