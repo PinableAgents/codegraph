@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { orbitNodes, orbitNodeSizes } from '../ui/src/lib/map-orbit';
+import { orbitNodes, orbitNodeSizes, orbitVisibleLabels } from '../ui/src/lib/map-orbit';
 import { calculateRenderLayout } from '../ui/src/lib/graph-layout-runner';
 import { snapshotSvg } from '../ui/src/lib/graph-snapshot';
 import type { GraphScene, Point, SceneNode } from '../ui/src/lib/graph-scene';
@@ -37,6 +37,18 @@ describe('architecture constellation', () => {
     }
     await expect(calculateRenderLayout('relationships', { ...input, nodes: [...input.nodes, input.nodes[0]] }, { mode: 'orbit' })).rejects.toThrow('400');
   }, 20000);
+
+  it('never lets a crowded label cover the selected node label or a higher-degree hub', () => {
+    const nodes = orbitNodes(fixture(4).nodes, new Map([['n0', 8], ['n1', 16], ['n2', 8], ['n3', 8]]));
+    [nodes[0]!.x, nodes[1]!.x, nodes[2]!.x, nodes[3]!.x] = [0, 5, 350, 700];
+    [nodes[0]!.y, nodes[1]!.y] = [0, 0];
+    expect([...orbitVisibleLabels(nodes, true, null)].sort()).toEqual(['n1', 'n2', 'n3']);
+    expect([...orbitVisibleLabels(nodes, false, null)]).toEqual([]);
+    expect([...orbitVisibleLabels(nodes, true, 'n0')]).toEqual(['n0']);
+    nodes[0]!.selected = true;
+    expect([...orbitVisibleLabels(nodes, true, 'n1')]).toEqual(['n0']);
+    expect([...orbitVisibleLabels(nodes, true, 'n2')]).toEqual(['n0', 'n2']);
+  });
 
   it('exports subdued dot geometry without fabricating direction arrows', () => {
     const scene = fixture(2);

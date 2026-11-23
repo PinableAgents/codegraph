@@ -2,7 +2,7 @@ import { Graph, BaseEdge, Cubic, ExtensionCategory, register, type GraphData, ty
 import { mount, unmount } from 'svelte';
 import type { GraphController, GraphScene, GraphSnapshot, SceneNode, Viewport } from './graph-scene';
 import { snapshotSvg } from './graph-snapshot';
-import { orbitLabelZoom } from './map-orbit';
+import { orbitLabelZoom, orbitVisibleLabels } from './map-orbit';
 
 /** Extensions capture the actual routed path for export, rather than redrawing old model curves. */
 class RoutedEdge extends Cubic {
@@ -289,6 +289,7 @@ export class G6Runtime implements GraphController {
     const nodeLabels: (Pick<NodeData, 'id'> & Partial<NodeData>)[] = [], arrowStyles: Partial<EdgeData>[] = [];
     const orbit = this.scene.appearance === 'orbit';
     const pinned = (this.scene.kind === 'map' || this.scene.kind === 'screens') && this.scene.nodes.some(n => n.selected);
+    const visibleOrbitLabels = orbit ? orbitVisibleLabels(this.scene.nodes, this.orbitZoomLabels, this.hoveredNode) : null;
     const relatedNodes = new Set<string>();
     const relatedEdges = new Set<string>();
     if (this.hoveredNode) relatedNodes.add(this.hoveredNode);
@@ -302,8 +303,8 @@ export class G6Runtime implements GraphController {
     const state = (name: string) => orbit ? `orbit-${name}` : name;
     for (const n of this.scene.nodes) {
       const next = n.selected ? [state('selected')] : this.highlighted.has(n.id) || (hovering && relatedNodes.has(n.id)) ? [state('active')] : n.dimmed || (hovering && !n.decorative) ? [state('dimmed')] : [];
-      if (orbit) {
-        const visible = n.selected === true || n.id === this.hoveredNode || (this.orbitZoomLabels && !next.includes('orbit-dimmed'));
+      if (visibleOrbitLabels) {
+        const visible = visibleOrbitLabels.has(n.id);
         if (this.orbitNodeLabels.get(n.id) !== visible) {
           this.orbitNodeLabels.set(n.id, visible);
           nodeLabels.push({ id: n.id, style: { label: visible } });
