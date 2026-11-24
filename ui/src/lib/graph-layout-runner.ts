@@ -1,5 +1,4 @@
 import { graphBudget, programBudget } from './graph-budget';
-import { compactMapPositions, type CompactMapInput } from './map-compact';
 import { buildMapLayout, type MapLayoutOptions } from './map-model';
 import { buildScreensModel } from './screens-model';
 import { buildStepsModel } from './steps-model';
@@ -16,23 +15,13 @@ export async function calculateRenderLayout(kind: string, payload: unknown, opti
     const { layoutRelationships } = await import('./relationship-layout');
     return layoutRelationships(data, options.mode as Exclude<import('./relationship-layout').RelationshipLayout, 'default'>);
   }
-  const result = calculateLayout(kind, payload, options);
-  if (kind === 'map') {
-    const { layoutArchitecture } = await import('./g6-layout');
-    return layoutArchitecture(result as import('./map-model').MapLayout);
-  }
-  return result;
+  return calculateLayout(kind, payload, options);
 }
 export function calculateLayout(kind: string, payload: unknown, options: Record<string, unknown>) {
   if (kind === 'scene-routes') {
     const data = payload as { nodes: Parameters<typeof routeScene>[0]; edges: Parameters<typeof routeScene>[1] };
     assertBudget(graphBudget(data.nodes.length, data.edges.length));
     return routeScene(data.nodes, data.edges);
-  }
-  if (kind === 'map-compact') {
-    const data = payload as CompactMapInput;
-    assertBudget(graphBudget(data.nodes.length, data.edges.length));
-    return compactMapPositions(data);
   }
   let result;
   if (kind === 'map') {

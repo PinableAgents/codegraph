@@ -91,7 +91,7 @@
 <aside class="mapside">
   <h2>Architecture map</h2>
   <p>
-    {graphText('架构依赖默认使用星点布局，连接越多的模块圆点越大。悬停或选中时可看名称和直接关系，放大可显示更多标签。可开启方向箭头或切换至分层、力导向、同心圆及环形。箭头从调用或依赖方指向目标；双向依赖用双箭头表示。', 'Architecture dependencies open in the constellation layout. More connected modules have larger dots. Hover or select to see names and direct relationships, or zoom in to see more labels. Show direction arrows or switch to hierarchical, force-directed, concentric or circular layouts. Arrows point from caller or dependent to target; mutual dependencies show arrows at both ends.')}
+    {graphText('架构依赖使用星点布局，连接越多的模块圆点越大。悬停或选中时可看名称和直接关系，放大可显示更多标签。可开启方向箭头。箭头从调用或依赖方指向目标；双向依赖用双箭头表示。', 'Architecture dependencies use a constellation layout. More connected modules have larger dots. Hover or select to see names and direct relationships, or zoom in to see more labels. Direction arrows are optional. Arrows point from caller or dependent to target; mutual dependencies show arrows at both ends.')}
   </p>
 
   <!-- The map is the thing people paste into a README, so the way out sits

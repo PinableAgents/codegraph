@@ -15,8 +15,6 @@ export interface GraphHistory {
   focusOnly?: boolean;
   focusDirection?: 'in' | 'out' | 'both';
   scope?: string;
-  /** 只保留当前有界画布的手动位置，不保存图谱数据。 */
-  positions?: Record<string, { x: number; y: number }>;
   flowPlaying?: boolean;
   edgeStyle?: import('./map-edge-path').MapEdgeStyle;
 }
@@ -25,7 +23,9 @@ export function readGraphHistory(key: string): GraphHistory {
   return states.get(key) ?? {};
 }
 export function saveGraphHistory(key: string, patch: GraphHistory): void {
-  states.set(key, { ...states.get(key), ...patch });
+  const next = { ...states.get(key), ...patch };
+  if (next.relationshipLayout === undefined) delete next.relationshipLayout;
+  states.set(key, next);
   // 历史仅保留轻量状态，避免长期会话无限增长。
   if (states.size > 100) states.delete(states.keys().next().value!);
 }

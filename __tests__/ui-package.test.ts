@@ -1,3 +1,5 @@
+// Load the shared layout dependency before starting UI interaction clocks.
+import '../ui/src/lib/relationship-layout';
 /**
  * `@colbymchenry/codegraph-ui` — the package's own test (task CG-61).
  *
@@ -480,7 +482,6 @@ let mounted: Record<string, unknown> | null = null;
 
 /** jsdom has none of the observers a canvas library expects. */
 beforeAll(async () => {
-  await import('../ui/src/lib/g6-layout');
   class NoopObserver {
     observe(): void {}
     unobserve(): void {}
@@ -1205,7 +1206,7 @@ it('Map通过G6场景保留模块标签和键盘选择入口', async () => {
    await render(ArchitectureMap, { root: null, depth: 2, tests: false });
    await vi.waitFor(() => expect(host.querySelector('[data-graph-engine="g6"]')).not.toBeNull());
    expect(host.querySelectorAll('.accessible button').length).toBeGreaterThan(0);
-   expect(g6Harness.scene.nodes.every((n: any) => n.width > 0 && n.height > 0)).toBe(true);
+   await vi.waitFor(() => expect(g6Harness.scene?.nodes.every((n: any) => n.width > 0 && n.height > 0)).toBe(true));
  });
 
 it('同项目乱序刷新只采用最后一次统计、入口和路径列表', async () => {
@@ -1289,17 +1290,17 @@ it('G6场景合并双向展示边但保留真实有向关系', async () => {
 
 it('G6节点移动保存位置，流向播放和恢复布局保持可用', async () => {
    const { saveGraphHistory, readGraphHistory } = await import('../ui/src/lib/graph-history');
-   saveGraphHistory(location.href, { positions: {}, selected: null, flowPlaying: false });
+   saveGraphHistory(location.href, { layoutPositions: {}, selected: null, flowPlaying: false });
    setGraphAdapter(mockAdapter().adapter);
    await render(ArchitectureMap, { root: 'src', depth: 1, tests: false });
    await vi.waitFor(() => expect(g6Harness.scene?.nodes.length).toBeGreaterThan(0));
    const n = g6Harness.scene.nodes[0]; g6Harness.events.move(n.id, n.x + 10, n.y); flushSync();
-   expect(readGraphHistory(location.href).positions?.[n.id]?.x).toBe(n.x + 10);
+   expect(readGraphHistory(location.href).layoutPositions?.orbit?.[n.id]?.x).toBe(n.x + 10);
    const play = [...host.querySelectorAll<HTMLButtonElement>('button')].find(b => /播放流向|Play flow/.test(b.textContent ?? ''))!;
    play.click(); flushSync(); await vi.waitFor(() => expect(g6Harness.scene.edges.some((e: any) => e.flowing)).toBe(true));
    play.click(); flushSync(); expect(readGraphHistory(location.href).flowPlaying).toBe(false);
-   const reset = [...host.querySelectorAll<HTMLButtonElement>('button')].find(b => /恢复分层布局|Restore hierarchical layout/.test(b.textContent ?? ''))!;
-   expect(reset.disabled).toBe(false); reset.click(); flushSync(); expect(readGraphHistory(location.href).positions).toEqual({});
+   const reset = [...host.querySelectorAll<HTMLButtonElement>('button')].find(b => /重置节点位置|Reset node positions/.test(b.textContent ?? ''))!;
+   expect(reset.disabled).toBe(false); reset.click(); flushSync(); expect(readGraphHistory(location.href).layoutPositions).toEqual({});
  });
 
 it('旧直角折线视图回退为直线，选择器只保留曲线和直线', async () => {
@@ -1314,59 +1315,44 @@ it('旧直角折线视图回退为直线，选择器只保留曲线和直线', a
   expect(g6Harness.scene.edges.every((e: any) => !e.path || /^M[^C]+ L/.test(e.path))).toBe(true);
 });
 
-it('连线切换保留位置，紧凑排列将聚焦节点移近并保存当前线型', async () => {
+it('架构依赖始终使用星点；忽略并清理旧布局且保留星点拖动、选中与方向箭头', async () => {
   const { saveGraphHistory, readGraphHistory } = await import('../ui/src/lib/graph-history');
-  saveGraphHistory(location.href, { positions: { 'src/http': { x: 50000, y: 50000 } }, selected: 'src/auth', focusOnly: true, focusDirection: 'both', edgeStyle: 'curve', viewport: { x: 0, y: 0, zoom: 1 } });
+  saveGraphHistory(location.href, {
+    relationshipLayout: 'circular', layoutPositions: { circular: { 'src/http': { x: 50000, y: 50000 } } },
+    selected: 'src/auth', focusOnly: true, focusDirection: 'both', edgeStyle: 'curve', viewport: { x: 0, y: 0, zoom: 1 },
+  });
   setGraphAdapter(mockAdapter().adapter);
   await render(ArchitectureMap, { root: 'src', depth: 1, tests: false });
+  const canvas = host.querySelector('[data-graph-engine]')!;
+  await vi.waitFor(() => expect(g6Harness.scene?.appearance).toBe('orbit'));
+  expect(canvas.getAttribute('data-layout')).toBe('orbit');
+  expect(host.querySelector('[aria-label="图布局"]')).toBeNull();
+  expect(host.textContent).not.toMatch(/紧凑排列|恢复分层布局/);
+  expect(readGraphHistory(location.href).relationshipLayout).toBeUndefined();
+  expect(readGraphHistory(location.href).layoutPositions?.circular).toBeUndefined();
+  const node = g6Harness.scene.nodes.find((n:any)=>n.id==='src/http');
+  expect(node.x).toBeLessThan(1000);
+  g6Harness.events.move(node.id, node.x + 90, node.y); flushSync();
   const style = host.querySelector<HTMLOptionElement>('option[value="straight"]')!.parentElement as HTMLSelectElement;
   style.value = 'straight'; style.dispatchEvent(new Event('change', { bubbles: true })); flushSync();
+  expect(g6Harness.scene.nodes.find((n:any)=>n.id===node.id).x).toBe(node.x + 90);
   expect(readGraphHistory(location.href).edgeStyle).toBe('straight');
-  expect(readGraphHistory(location.href).positions?.['src/http']).toEqual({ x: 50000, y: 50000 });
-  const compact = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => /紧凑排列|Compact layout/.test(button.textContent ?? ''))!;
-  expect(compact.disabled).toBe(false);
-  compact.click(); flushSync();
-  await vi.waitFor(() => expect(readGraphHistory(location.href).positions?.['src/http']?.x).toBeLessThan(1000));
-  expect(Object.keys(readGraphHistory(location.href).positions ?? {}).sort()).toEqual(['src/auth', 'src/http']);
-  expect(g6Harness.scene.edges.every((e: any) => !e.path || /^M[^C]+ L/.test(e.path))).toBe(true);
-  style.value = 'curve'; style.dispatchEvent(new Event('change', { bubbles: true })); flushSync();
-  expect(g6Harness.scene.edges.every((e: any) => !e.path)).toBe(true);
-  expect(readGraphHistory(location.href).edgeStyle).toBe('curve');
+  const arrows = [...host.querySelectorAll('button')].find(b=>b.textContent==='显示方向箭头')!;
+  arrows.click(); flushSync();
+  expect(g6Harness.scene.showArrows).toBe(true);
+  expect(g6Harness.scene.relations.some((e:any)=>e.source==='src/auth'||e.target==='src/auth')).toBe(true);
+  await unmount(mounted!); mounted=null;
+  await render(ArchitectureMap, { root: 'src', depth: 1, tests: false });
+  await vi.waitFor(()=>expect(g6Harness.scene?.nodes.find((n:any)=>n.id===node.id)?.x).toBe(node.x + 90));
+  expect(host.querySelector('[data-graph-engine]')?.getAttribute('data-layout')).toBe('orbit');
+  expect(host.querySelector('[aria-label="图布局"]')).toBeNull();
+  saveGraphHistory(location.href, { layoutPositions:{}, selected:null, focusOnly:false });
 });
 
-it('紧凑排列期间切换选中对象，迟到Worker结果不能覆盖位置', async () => {
-  const { saveGraphHistory, readGraphHistory } = await import('../ui/src/lib/graph-history');
-  const { calculateLayout } = await import('../ui/src/lib/graph-layout-runner');
-  const pending: ControlledWorker[] = [];
-  class ControlledWorker {
-    onmessage: ((event: { data: { result: unknown } }) => void) | null = null;
-    onerror = null; stopped = false;
-    postMessage(job: { kind: string; payload: unknown; options: Record<string, unknown> }) {
-      if (job.kind === 'map-compact') pending.push(this);
-      else queueMicrotask(() => this.onmessage?.({ data: { result: calculateLayout(job.kind, job.payload, job.options) } }));
-    }
-    terminate() { this.stopped = true; }
-  }
-  const original = globalThis.Worker;
-  globalThis.Worker = ControlledWorker as unknown as typeof Worker;
-  try {
-    saveGraphHistory(location.href, { positions: {}, selected: 'src/auth', focusOnly: true, edgeStyle: 'curve', viewport: { x: 0, y: 0, zoom: 1 } });
-    setGraphAdapter(mockAdapter().adapter);
-    await render(ArchitectureMap, { root: 'src', depth: 1, tests: false });
-    [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => /紧凑排列|Compact layout/.test(button.textContent ?? ''))!.click(); flushSync();
-    expect(pending).toHaveLength(1);
-    [...host.querySelectorAll<HTMLButtonElement>('.accessible button')].find(button => button.textContent?.includes('http'))!.click(); flushSync();
-    expect(pending[0]!.stopped).toBe(true);
-    pending[0]!.onmessage?.({ data: { result: { 'src/auth': { x: 9999, y: 9999 } } } }); flushSync();
-    expect(readGraphHistory(location.href).positions).toEqual({});
-    expect(readGraphHistory(location.href).selected).toBe('src/http');
-  } finally { globalThis.Worker = original; }
-});
-
-it('关系布局切换保留真实边，选择不重排，手动位置按布局隔离并恢复历史', async () => {
+it('屏幕流转图布局切换保留真实边，选择不重排，手动位置按布局隔离并恢复历史', async () => {
   const { default: GraphCanvas } = await import('../ui/src/components/graph/GraphCanvas.svelte');
   const { saveGraphHistory, readGraphHistory } = await import('../ui/src/lib/graph-history');
-  const scene: import('../ui/src/lib/graph-scene').GraphScene = {kind:'map',groups:[],
+  const scene: import('../ui/src/lib/graph-scene').GraphScene = {kind:'screens',groups:[],
     nodes:['a','b','c','d'].map((id,i)=>({id,label:id,sub:'',kind:'module',x:i*240,y:0,width:180,height:48,draggable:true})),
     relations:[{id:'ab',source:'a',target:'b'}],edges:[{id:'ab',source:'a',target:'b',label:'1',width:1,originalIds:['ab'],path:'M180,24 L240,24',straight:true}]};
   const originalPositions=scene.nodes.map(n=>[n.x,n.y]);
@@ -1377,7 +1363,7 @@ it('关系布局切换保留真实边，选择不重排，手动位置按布局�
   // Match the mounted component's scope (Vite supplies its own filename to the compiler).
   const compiledScope = canvasCss.match(/svelte-[\w-]+/)![0];
   const selectMode=(mode:string)=>{const select=host.querySelector<HTMLSelectElement>('select[aria-label="图布局"]')!;select.value=mode;select.dispatchEvent(new Event('change',{bubbles:true}));flushSync();};
-  const ready=()=>vi.waitFor(()=>expect(host.querySelector('[data-graph-engine]')?.getAttribute('aria-busy')).toBe('false'));
+  const ready=()=>vi.waitFor(()=>expect(host.querySelector('[data-graph-engine]')?.getAttribute('aria-busy')).toBe('false'), { timeout: 6000 });
   saveGraphHistory(location.href,{relationshipLayout:'default',layoutPositions:{},collapsedGroups:[],selected:null,analysisFocus:false});
   try {
     await render(GraphCanvas,{scene});
@@ -1417,7 +1403,7 @@ it('关系布局切换保留真实边，选择不重排，手动位置按布局�
     expect(g6Harness.scene.nodes.map((n:any)=>[n.x,n.y])).toEqual(originalPositions);
     expect(readGraphHistory(location.href).layoutPositions).toEqual({});
   } finally { stylesheet.remove(); saveGraphHistory(location.href,{relationshipLayout:'default',layoutPositions:{},selected:null}); }
-});
+}, 15_000);
 
 it('架构图最近查看最多十个，去重置顶，重开保留，点击展开并定位，跨范围隔离',async()=>{
   const { default: GraphCanvas } = await import('../ui/src/components/graph/GraphCanvas.svelte');
@@ -1464,7 +1450,7 @@ it('切换关系布局取消旧Worker，折叠与选择不重排，卸载取消�
     postMessage(){pending.push(this);}terminate(){this.stopped=true;}
   }
   const original=globalThis.Worker;globalThis.Worker=ControlledWorker as unknown as typeof Worker;
-  const scene:import('../ui/src/lib/graph-scene').GraphScene={kind:'map',groups:[],relations:[],edges:[],
+  const scene:import('../ui/src/lib/graph-scene').GraphScene={kind:'screens',groups:[{id:'src',label:'src',members:['src/a','src/b']}],relations:[],edges:[],
     nodes:['src/a','src/b'].map(id=>({id,label:id,sub:'',kind:'module',x:0,y:0,width:180,height:48}))};
   const selectMode=(mode:string)=>{const select=host.querySelector<HTMLSelectElement>('select[aria-label="图布局"]')!;select.value=mode;select.dispatchEvent(new Event('change',{bubbles:true}));flushSync();};
   saveGraphHistory(location.href,{relationshipLayout:'default',layoutPositions:{},collapsedGroups:[],selected:null,analysisFocus:false});

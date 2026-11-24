@@ -2,7 +2,6 @@
 <script lang="ts">
   import { selectDropdown } from '../lib/dropdown';
   import type { MapEdgeStyle } from '../lib/map-edge-path';
-  import type { CompactMapInput } from '../lib/map-compact';
   import { graphStatus } from '../lib/graph-status.svelte';
   import DirectoryBrowser from '../components/graph/DirectoryBrowser.svelte';
   import { getGraphAdapter } from '../lib/adapter';
@@ -16,7 +15,6 @@
   import { buildMapIndex, indexedOneHop, cachedPresentation, mapNodeMeasurements, positionedMapPoints } from '../lib/map-index';
   import { requestLayout } from '../lib/graph-layout';
   import GraphCanvas from '../components/graph/GraphCanvas.svelte';
-  import type { RelationshipLayout } from '../lib/relationship-layout';
   import { graphScene } from '../lib/graph-adapters';
   import type { Node, Edge, GraphController } from '../lib/graph-scene';
   import MapSidePanel from '../components/map/MapSidePanel.svelte';
@@ -37,7 +35,6 @@
   }
 
   let { root, depth, tests }: Props = $props();
-  let relationshipLayout = $state<RelationshipLayout>('orbit');
 
   let visibleCounts = $state<{nodes:number;edges:number}|null>(null);
   let payload = $state<WireMapPayload | null>(null);
@@ -101,17 +98,13 @@
 
   const selectedTarget = $derived.by(() => { const module = selected ? index?.nodeById.get(selected)?.module : null; return module ? moduleTarget(module) : null; });
   let layout = $state<MapLayout | null>(null);
-  let positions = $state<Record<string, { x: number; y: number }>>({});
   let flowPlaying = $state(false);
   let edgeStyle = $state<MapEdgeStyle>('straight');
-  let fitRequest = $state<object | null>(null);
-  let compactRequest = $state.raw<{ layout: MapLayout; direction: string; input: CompactMapInput } | null>(null);
-  const manuallyPlaced = $derived(Object.keys(positions).length > 0);
   const budget = $derived(payload ? (payload as WireMapPayload & { budget?: ReturnType<typeof graphBudget> }).budget ?? graphBudget(payload.modules.length, payload.links.length) : null);
   $effect(() => {
     const next = payload; const options = { includeTests: tests, minWeight };
     if (!next || budget?.exceeded) { layout = null; return; }
-    return requestLayout<MapLayout>('map', $state.snapshot(next), options, result => untrack(() => { layout = result; const ids = new Set(result.nodes.map(node => node.id)); positions = Object.fromEntries(Object.entries(positions).filter(([id]) => ids.has(id))); }), message => error = message);
+    return requestLayout<MapLayout>('map', $state.snapshot(next), options, result => { layout = result; }, message => error = message);
   });
 
   /** Modules one hop from the selection — everything else is dimmed, not hidden. */
@@ -125,10 +118,10 @@
   const nodePresentation = $derived.by(() => {
     void layout;
     return cachedPresentation<MapNodeLayout, Node>((node, flags) => ({
-      id: node.id, type: 'module', position: positions[node.id] ?? { x: node.x, y: node.y },
+      id: node.id, type: 'module', position: { x: node.x, y: node.y },
       ...mapNodeMeasurements(node),
       draggable: true, dragHandle: '.mnode', selectable: false, connectable: false,
-      data: { layout: node, selected: flags[0] === '1', dimmed: flags[1] === '1', onSelect: onNodeSelect, onMove: moveNode },
+      data: { layout: node, selected: flags[0] === '1', dimmed: flags[1] === '1', onSelect: onNodeSelect },
     }));
   });
   const edgePresentation = $derived.by(() => {
@@ -137,24 +130,18 @@
       id: edge.id, source: edge.source, target: edge.target,
       sourceHandle: 'out', targetHandle: 'in',
       type: 'module', selectable: false, deletable: false,
-      data: { edge: manuallyPlaced ? { ...edge, controlPoints: undefined } : edge, points: positionedMapPoints(currentIndex!, edge, livePositions), hot: flags[0] === '1', flowing: flags[1] === '1', edgeStyle, dimmed: false, onHover: onEdgeHover },
+      data: { edge, points: positionedMapPoints(currentIndex!, edge, livePositions), hot: flags[0] === '1', flowing: flags[1] === '1', edgeStyle, dimmed: false, onHover: onEdgeHover },
     }));
   });
   let nodes = $state.raw<Node[]>([]);
-  // 位置通过双向绑定接收绘图库的拖动更新，不重新运行布局 Worker。
+  // 星点拖动位置由画布独立保存，不影响模块模型。
   $effect(() => {
     nodes = !layout ? [] : layout.nodes.map(node => {
-      const position = positions[node.id] ?? { x: node.x, y: node.y };
+      const position = { x: node.x, y: node.y };
       return nodePresentation(node, `${selected === node.id ? 1 : 0}${neighbours !== null && !neighbours.has(node.id) ? 1 : 0}:${position.x},${position.y}`);
     });
   });
   const livePositions = $derived(new Map(nodes.map(node => [node.id, node.position])));
-  function moveNode(id: string, dx: number, dy: number): void {
-    const position = livePositions.get(id);
-    compactRequest = null;
-    if (position) positions = { ...positions, [id]: { x: position.x + dx, y: position.y + dy } };
-  }
-
   const visibleEdges = $derived.by(() => {
     if (!index) return [];
     return layout?.edges.filter(edge => !edge.thin) ?? [];
@@ -167,31 +154,6 @@
     return edgePresentation(edge, `${hot ? 1 : 0}${flowPlaying && i < 200 ? 1 : 0}:${edgeStyle}:${points.source.x},${points.source.y},${points.target.x},${points.target.y}`);
   }));
   const selectedFiles = $derived(selected ? index?.nodeById.get(selected)?.module.fileList.items ?? [] : []);
-
-  function compactVisible(): void {
-    if (!layout || !selected || !focusOnly) return;
-    relationshipLayout = 'default';
-    hovered = null;
-    compactRequest = { layout, direction: focusDirection, input: {
-      selected,
-      nodes: nodes.filter(node => neighbours?.has(node.id)).map(node => { const original = index!.nodeById.get(node.id)!; return { id: node.id, width: original.width, height: original.height }; }),
-      edges: visibleEdges.filter(edge => neighbours?.has(edge.source) && neighbours.has(edge.target)).map(edge => ({ source: edge.source, target: edge.target })),
-    } };
-  }
-  $effect(() => {
-    const request = compactRequest;
-    if (!request) return;
-    // 切换范围、所选对象或一跳方向后，旧排列不能覆盖新的分析上下文。
-    if (request.layout !== layout || request.input.selected !== selected || request.direction !== focusDirection || !focusOnly) { compactRequest = null; return; }
-    let active = true;
-    const cancel = requestLayout<Record<string, { x: number; y: number }>>('map-compact', request.input, {}, result => untrack(() => {
-      if (!active) return;
-      positions = { ...positions, ...result };
-      compactRequest = null;
-      fitRequest = {};
-    }), message => { if (active) { error = message; compactRequest = null; } });
-    return () => { active = false; cancel(); };
-  });
 
   function onEdgeHover(edge: MapEdgeLayout | null, event: MouseEvent | null): void {
     if (edge === null || event === null || stage === null) {
@@ -239,10 +201,9 @@
   debouncedWeight = restored.minWeight ?? 1;
   focusOnly = restored.focusOnly ?? false;
   focusDirection = restored.focusDirection ?? 'both';
-  positions = restored.positions ?? {};
   flowPlaying = restored.flowPlaying ?? false;
   edgeStyle = restored.edgeStyle === 'curve' ? 'curve' : 'straight';
-  $effect(() => saveGraphHistory(stateKey, { selected, minWeight, focusOnly, focusDirection, positions, flowPlaying, edgeStyle }));
+  $effect(() => saveGraphHistory(stateKey, { selected, minWeight, focusOnly, focusDirection, flowPlaying, edgeStyle }));
 
   $effect(() => {
     if (!payload) return;
@@ -269,11 +230,9 @@
   <label>{graphText('一跳方向', 'One-hop direction')} <select use:selectDropdown bind:value={focusDirection}><option value="both">{graphText('双向', 'Both')}</option><option value="in">{graphText('上游', 'Incoming')}</option><option value="out">{graphText('下游', 'Outgoing')}</option></select></label>
   <label><input type="checkbox" bind:checked={focusOnly} />{graphText('只看聚焦', 'Focus only')}</label>
   <label>{graphText('连线', 'Edges')} <select use:selectDropdown aria-label={graphText('连线样式', 'Edge style')} bind:value={edgeStyle}><option value="curve">{graphText('曲线', 'Curve')}</option><option value="straight">{graphText('直线', 'Straight')}</option></select></label>
-  <button disabled={!focusOnly || !selected || !layout || !!compactRequest} title={graphText('选中节点并开启只看聚焦后，重新排列当前可见节点，缩短长距离连线。', 'Select a node and enable Focus only to arrange visible nodes closer together.')} onclick={compactVisible}>{compactRequest ? graphText('排列中…', 'Arranging…') : graphText('紧凑排列', 'Compact layout')}</button>
   <button disabled={!layout} aria-pressed={flowPlaying} onclick={() => flowPlaying = !flowPlaying}>{flowPlaying ? graphText('暂停流向', 'Pause flow') : graphText('播放流向', 'Play flow')}</button>
-  <button disabled={!manuallyPlaced && relationshipLayout === 'default'} onclick={() => { compactRequest = null; positions = {}; relationshipLayout = 'default'; fitRequest = {}; }}>{graphText('恢复分层布局', 'Restore hierarchical layout')}</button>
 </div>
-<p class="compact-note">{graphText('拖动节点整理链路；Alt + 方向键微调。箭头 A → B 表示 A 调用或依赖 B，动画不代表运行时数据。', 'Drag nodes to arrange links; use Alt + arrow keys to nudge. A → B means A calls or depends on B; animation does not represent runtime data.')} {manuallyPlaced ? graphText('当前为手动排列。', 'Manually arranged.') : graphText('当前为自动布局。', 'Automatic layout.')}{#if flowPlaying && visibleEdges.length > 200} {graphText('仅播放前 200 条关系；选中节点可聚焦局部流向。', 'Playing the first 200 relationships; select a node to focus the flow.')}{/if}</p>
+<p class="compact-note">{graphText('拖动节点整理链路；Alt + 方向键微调。箭头 A → B 表示 A 调用或依赖 B，动画不代表运行时数据。', 'Drag nodes to arrange links; use Alt + arrow keys to nudge. A → B means A calls or depends on B; animation does not represent runtime data.')}{#if flowPlaying && visibleEdges.length > 200} {graphText('仅播放前 200 条关系；选中节点可聚焦局部流向。', 'Playing the first 200 relationships; select a node to focus the flow.')}{/if}</p>
 <div class="mapview">
   <div class="mapstage" bind:this={stage}>
     {#if error && layout}<div class="retry-banner" role="alert">{error} <button onclick={() => retry++}>{graphText('重试', 'Retry')}</button></div>{/if}
@@ -297,10 +256,8 @@
         </p>
       </div>
     {:else if layout !== null}
-      <GraphCanvas scene={canvasScene} onVisibleChange={counts=>visibleCounts=counts} {selected} {fitRequest} bind:controller={graphController} bind:direction={focusDirection} bind:focusOnly bind:layoutMode={relationshipLayout}
-        onReset={()=>{compactRequest=null;positions={};}}
-        onSelect={id => { selected = id; hovered = null; }}
-        onMove={(id, x, y) => { compactRequest = null; positions = { ...positions, [id]: { x, y } }; }} />
+      <GraphCanvas scene={canvasScene} onVisibleChange={counts=>visibleCounts=counts} {selected} bind:controller={graphController} bind:direction={focusDirection} bind:focusOnly
+        onSelect={id => { selected = id; hovered = null; }} />
 
       {#if hovered !== null}
         <div class="tip" style={`left:${hovered.x}px;top:${hovered.y}px`}>

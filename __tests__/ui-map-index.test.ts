@@ -98,9 +98,9 @@ describe('手动排列与连线几何', () => {
     const { readGraphHistory, saveGraphHistory } = await import('../ui/src/lib/graph-history');
     const layout = fixture();
     expect(positionedMapLayout(layout, new Map())).toBe(layout);
-    saveGraphHistory('drag/p/a/map?depth=1', { positions: { same: { x: 100, y: 200 } } });
-    expect(readGraphHistory('drag/p/a/map?depth=1').positions?.same).toEqual({ x: 100, y: 200 });
-    expect(readGraphHistory('drag/p/b/map?depth=1').positions).toBeUndefined();
-    expect(readGraphHistory('drag/p/a/map?depth=2').positions).toBeUndefined();
+    saveGraphHistory('drag/p/a/map?depth=1', { layoutPositions: { orbit: { same: { x: 100, y: 200 } } } });
+    expect(readGraphHistory('drag/p/a/map?depth=1').layoutPositions?.orbit?.same).toEqual({ x: 100, y: 200 });
+    expect(readGraphHistory('drag/p/b/map?depth=1').layoutPositions).toBeUndefined();
+    expect(readGraphHistory('drag/p/a/map?depth=2').layoutPositions).toBeUndefined();
   });
 });
