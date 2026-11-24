@@ -1,4 +1,3 @@
-import { CircularLayout, ConcentricLayout, D3ForceLayout } from '@antv/layout';
 import type { GraphRelation, Point, SceneGroup } from './graph-scene';
 
 export type RelationshipLayout = 'default' | 'force' | 'concentric' | 'circular' | 'orbit';
@@ -92,6 +91,8 @@ async function place(boxes: LayoutBox[], relations: GraphRelation[], mode: Exclu
       y: centers[node.id]!.y - node.height / 2 - top + 48,
     }]));
   }
+  // Only Screens offers these layouts; keep the constellation worker off this dependency.
+  const { CircularLayout, ConcentricLayout, D3ForceLayout } = await import('@antv/layout');
   const algorithm = mode === 'circular'
     ? new CircularLayout({ center: [0, 0], radius: (diameter + 64) / (2 * Math.sin(Math.PI / nodes.length)), ordering: null, startAngle: -Math.PI / 2, endAngle: Math.PI * 1.5 })
     : mode === 'concentric'

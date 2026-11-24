@@ -15,12 +15,12 @@
 
   let { scene, selected, onSelect = () => {}, onMove = () => {}, onViewport = () => {}, onReset = () => {}, onVisibleChange = () => {},
     locate = null, fitRequest = null, controller = $bindable(null), fitInitially = true,
-    direction = $bindable('both'), focusOnly = $bindable(false), layoutMode = $bindable<RelationshipLayout>('default') }:
+    direction = $bindable('both'), focusOnly = $bindable(false) }:
     { scene: GraphScene; selected?: string | null; onSelect?: (id: string | null) => void;
       onMove?: (id: string, x: number, y: number) => void; onViewport?: (viewport: Viewport) => void; onReset?: () => void;
       onVisibleChange?: (counts:{nodes:number;edges:number})=>void;
       locate?: { id: string } | null; fitRequest?: object | null; controller?: GraphController | null; fitInitially?: boolean;
-      direction?: 'in' | 'out' | 'both'; focusOnly?: boolean; layoutMode?: RelationshipLayout } = $props();
+      direction?: 'in' | 'out' | 'both'; focusOnly?: boolean } = $props();
   let host: HTMLDivElement;
   let recentMenu = $state<HTMLDetailsElement>();
   let disposed = false;
@@ -30,11 +30,16 @@
   const key = typeof location === 'undefined' ? '' : location.href;
   const history = untrack(() => readGraphHistory(key));
   let recentNodes = $state(history.recentNodes ?? []);
-  const supportsLayouts = $derived(scene.kind === 'map' || scene.kind === 'screens');
-  const defaultLayout = untrack(() => scene.kind === 'map' ? layoutMode : 'default');
-  const savedLayout = history.relationshipLayout === 'orbit' && untrack(() => scene.kind) !== 'map' ? undefined : history.relationshipLayout;
-  layoutMode = untrack(() => supportsLayouts) ? savedLayout ?? defaultLayout : 'default';
-  let layoutPositions = $state(history.layoutPositions ?? {});
+  const orbit = $derived(scene.kind === 'map');
+  const screensLayouts = $derived(scene.kind === 'screens');
+  const supportsRelationships = $derived(orbit || screensLayouts);
+  type ScreenLayout = Exclude<RelationshipLayout, 'orbit'>;
+  const savedMode = history.relationshipLayout;
+  let screenLayout = $state<ScreenLayout>(savedMode === 'force' || savedMode === 'concentric' || savedMode === 'circular' ? savedMode : 'default');
+  const layoutMode = $derived<RelationshipLayout>(orbit ? 'orbit' : screensLayouts ? screenLayout : 'default');
+  let layoutPositions = $state<Partial<Record<RelationshipLayout, LayoutPositions>>>(untrack(() => orbit
+    ? (history.layoutPositions?.orbit ? { orbit: history.layoutPositions.orbit } : {})
+    : Object.fromEntries(Object.entries(history.layoutPositions ?? {}).filter(([mode]) => mode !== 'orbit'))));
   let placement = $state.raw<{key: string; positions: LayoutPositions} | null>(null);
   let layoutBusy = $state(false), layoutError = $state('');
   let pendingLayout: Promise<void> = Promise.resolve();
@@ -49,7 +54,6 @@
   let minimap = $state(false);
   let showAllRelationships = $state(false);
   let showArrows = $state(false);
-  const orbit = $derived(scene.kind === 'map' && layoutMode === 'orbit');
   let avoidNodes = $state(false);
   let routing = $state.raw<{ key: string; status: 'working' | 'ready' | 'fallback'; paths?: EdgePaths } | null>(null);
   let highlighted = $state<string[]>([]);
@@ -78,7 +82,7 @@
     nodes: geometryNodes.map(n=>({...n,...placement!.positions[n.id],...layoutPositions[layoutMode]?.[n.id]})),
     edges: projected.edges.map(e=>({...e,path:undefined,points:undefined,labelPoint:undefined})),
   });
-  const overview = $derived(supportsLayouts && !showAllRelationships && !focusOnly ? overviewEdges(projected) : null);
+  const overview = $derived(supportsRelationships && !showAllRelationships && !focusOnly ? overviewEdges(projected) : null);
   const presentation = $derived(relationshipPresentation(displayed, overview, current, direction, new Set(highlighted)));
   const routePlan = $derived(avoidNodes && !layoutBusy && !layoutError ? focusRoutingPlan(presentation, current, direction, collapsed) : null);
   const routeKey = $derived(typeof routePlan === 'object' && routePlan !== null ? routePlan.key : null);
@@ -99,8 +103,9 @@
     }
   }
   async function restore() {
-    fitAfterLayout = true; layoutMode = defaultLayout; layoutPositions = {};
-    onReset(); collapsed = []; focusOnly = false;
+    fitAfterLayout = true; layoutPositions = {};
+    // Resetting constellation positions is not a different analysis scope.
+    if (!orbit) { screenLayout = 'default'; onReset(); collapsed = []; focusOnly = false; }
     await settled(); await runtime?.fit();
   }
   function remember(id: string | null) {
@@ -114,7 +119,7 @@
   function chooseAccessible(id: string) {
     const concealed = !projectedIds.has(id) || groups.some(g => collapsed.includes(g.id) && g.members.includes(id));
     choose(id);
-    if (!supportsLayouts || concealed) void reveal([id]);
+    if (!supportsRelationships || concealed) void reveal([id]);
   }
   // Also capture selections made by the Map details panel or restored by its parent.
   $effect(() => { const id = current; untrack(()=>remember(id)); });
@@ -185,7 +190,7 @@
   const analysisKey = $derived(JSON.stringify([nodeIds, scene.relations]));
   $effect(() => { void analysisKey; highlighted = []; notice = ''; cycleChoice = ''; });
   $effect(()=>{if(focusOnly){void direction;void current;highlighted=[];notice='';cycleChoice='';}});
-  $effect(() => saveGraphHistory(key, { selected:current,collapsedGroups: collapsed, grouping, analysisDirection: direction, analysisFocus: focusOnly, relationshipLayout:layoutMode, layoutPositions, recentNodes }));
+  $effect(() => saveGraphHistory(key, { selected:current,collapsedGroups: collapsed, grouping, analysisDirection: direction, analysisFocus: focusOnly, relationshipLayout:screensLayouts ? screenLayout : undefined, layoutPositions, recentNodes }));
   onMount(() => {
     let active = true;
     void import('../../lib/g6-runtime').then(({ G6Runtime }) => {
@@ -213,7 +218,7 @@
     <button onclick={() => runtime?.fit()}>{t('适应画布', 'Fit view')}</button>
     <button disabled={!current} onclick={() => current && reveal([current])}>{t('定位选中', 'Focus selection')}</button>
     <button aria-pressed={minimap} onclick={() => minimap = !minimap}>{t('缩略图', 'Minimap')}</button>
-    {#if supportsLayouts}
+    {#if supportsRelationships}
       <button aria-pressed={showAllRelationships} disabled={focusOnly}
         onclick={() => showAllRelationships = !showAllRelationships}>{t('显示当前范围全部关系', 'Show all relationships in scope')}</button>
       <button aria-pressed={avoidNodes} onclick={() => avoidNodes = !avoidNodes}
@@ -221,8 +226,9 @@
       {#if hiddenRelationships > 0}
         <span class="hidden-count" role="status">{hiddenRelationships} {t('条连线已收起', 'lines hidden')}</span>
       {/if}
-      <select use:selectDropdown aria-label={t('图布局', 'Graph layout')} value={layoutMode} onchange={e=>{fitAfterLayout=true;layoutMode=e.currentTarget.value as RelationshipLayout;}}>
-        {#if scene.kind === 'map'}<option value="orbit">{t('星点', 'Constellation')}</option>{/if}
+    {/if}
+    {#if screensLayouts}
+      <select use:selectDropdown aria-label={t('图布局', 'Graph layout')} value={screenLayout} onchange={e=>{fitAfterLayout=true;screenLayout=e.currentTarget.value as ScreenLayout;}}>
         <option value="default">{t('分层', 'Hierarchical')}</option>
         <option value="force">{t('力导向', 'Force-directed')}</option>
         <option value="concentric">{t('同心圆', 'Concentric')}</option>
@@ -230,11 +236,11 @@
       </select>
     {/if}
     {#if orbit}<button aria-pressed={showArrows} onclick={() => showArrows = !showArrows}>{t('显示方向箭头', 'Show direction arrows')}</button>{/if}
-    <button onclick={restore}>{t('恢复布局', 'Restore layout')}</button>
+    <button onclick={restore}>{orbit ? t('重置节点位置', 'Reset node positions') : t('恢复布局', 'Restore layout')}</button>
     <details use:dismissDropdown>
       <summary>{t('分析', 'Analyze')}</summary>
       <div class="analysis">
-        {#if !supportsLayouts}<label>{t('上下游', 'Direction')}<select use:selectDropdown bind:value={direction}><option value="both">{t('双向', 'Both')}</option><option value="in">{t('上游', 'Incoming')}</option><option value="out">{t('下游', 'Outgoing')}</option></select></label>{/if}
+        {#if !supportsRelationships}<label>{t('上下游', 'Direction')}<select use:selectDropdown bind:value={direction}><option value="both">{t('双向', 'Both')}</option><option value="in">{t('上游', 'Incoming')}</option><option value="out">{t('下游', 'Outgoing')}</option></select></label>{/if}
         <label><input type="checkbox" bind:checked={focusOnly} />{t('只看一跳聚焦', 'Focus one hop')}</label>
         <label>{t('起点', 'From')}<select use:selectDropdown bind:value={from}><option value="">—</option>{#each realNodes as n (n.id)}<option value={n.id}>{n.label}</option>{/each}</select></label>
         <label>{t('终点', 'To')}<select use:selectDropdown bind:value={to}><option value="">—</option>{#each realNodes as n (n.id)}<option value={n.id}>{n.label}</option>{/each}</select></label>
