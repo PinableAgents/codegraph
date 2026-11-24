@@ -1,3 +1,5 @@
+// Load the shared layout dependency before starting UI interaction clocks.
+import '../ui/src/lib/relationship-layout';
 /**
  * `@colbymchenry/codegraph-ui` — the package's own test (task CG-61).
  *
@@ -480,8 +482,6 @@ let mounted: Record<string, unknown> | null = null;
 
 /** jsdom has none of the observers a canvas library expects. */
 beforeAll(async () => {
-  // Warm the shared renderer dependency before testing UI interaction clocks.
-  await import('../ui/src/lib/relationship-layout');
   class NoopObserver {
     observe(): void {}
     unobserve(): void {}
