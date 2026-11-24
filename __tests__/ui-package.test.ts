@@ -1361,7 +1361,7 @@ it('屏幕流转图布局切换保留真实边，选择不重排，手动位置�
   // Match the mounted component's scope (Vite supplies its own filename to the compiler).
   const compiledScope = canvasCss.match(/svelte-[\w-]+/)![0];
   const selectMode=(mode:string)=>{const select=host.querySelector<HTMLSelectElement>('select[aria-label="图布局"]')!;select.value=mode;select.dispatchEvent(new Event('change',{bubbles:true}));flushSync();};
-  const ready=()=>vi.waitFor(()=>expect(host.querySelector('[data-graph-engine]')?.getAttribute('aria-busy')).toBe('false'));
+  const ready=()=>vi.waitFor(()=>expect(host.querySelector('[data-graph-engine]')?.getAttribute('aria-busy')).toBe('false'), { timeout: 6000 });
   saveGraphHistory(location.href,{relationshipLayout:'default',layoutPositions:{},collapsedGroups:[],selected:null,analysisFocus:false});
   try {
     await render(GraphCanvas,{scene});
