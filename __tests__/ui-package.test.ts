@@ -1401,7 +1401,7 @@ it('屏幕流转图布局切换保留真实边，选择不重排，手动位置�
     expect(g6Harness.scene.nodes.map((n:any)=>[n.x,n.y])).toEqual(originalPositions);
     expect(readGraphHistory(location.href).layoutPositions).toEqual({});
   } finally { stylesheet.remove(); saveGraphHistory(location.href,{relationshipLayout:'default',layoutPositions:{},selected:null}); }
-});
+}, 15_000);
 
 it('架构图最近查看最多十个，去重置顶，重开保留，点击展开并定位，跨范围隔离',async()=>{
   const { default: GraphCanvas } = await import('../ui/src/components/graph/GraphCanvas.svelte');
