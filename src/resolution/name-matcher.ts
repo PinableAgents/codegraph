@@ -27,7 +27,7 @@ import { ambientModuleDeclarations, declaringFileAnswers, inBlock, isDeclaration
 import { leavesWorkspaceRoot } from './workspace-packages';
 import { isMinifiedContent } from '../extraction/generated-detection';
 import { getCargoWorkspaceCrateMap, parsePackageName, parseTargetPaths, parseWorkspaceMembers } from './frameworks/cargo-workspace';
-import { blankRustCode, readRustScopes, rustBindingAt, rustInnerBlockAt, rustBoundsOf, rustFnAt, rustImplAt, splitRustTopLevel, type RustBinding, type RustPatternSite, type RustScopes } from './rust-scopes';
+import { blankRustCode, readRustScopes, rustBindingAt, rustInnerBlockAt, rustBoundsOf, rustFnAt, rustImplAt, splitRustTopLevel, type RustBinding, type RustClosureCallee, type RustPatternSite, type RustScopes } from './rust-scopes';
 /**
  * Ceiling on how many same-named definitions a FUZZY name-match strategy will
  * score. A name defined more times than this is "ubiquitous" — a method/symbol
@@ -3723,8 +3723,19 @@ function readGoScopes(code: string): GoScopeIndex {
     // declare; `x := pkg.New(…)` the package its value comes from, `x :=
     // newStore(…)` the function of its own package.
     const rhs = code.slice(i + 2, i + 160);
-    const literal = /^[ \t]*&?[ \t]*((?:[A-Za-z_]\w*\.)?[A-Za-z_]\w*)[ \t]*\{/.exec(rhs)?.[1] ??
-      /^[ \t]*new\([ \t]*((?:[A-Za-z_]\w*\.)?[A-Za-z_]\w*)[ \t]*\)/.exec(rhs)?.[1];
+    const written = /^[ \t]*&?[ \t]*((?:[A-Za-z_]\w*\.)?[A-Za-z_]\w*)[ \t]*\{/.exec(rhs) ??
+      /^[ \t]*new\([ \t]*((?:[A-Za-z_]\w*\.)?[A-Za-z_]\w*)[ \t]*\)/.exec(rhs);
+    // A selector after the literal or the `new(T)` makes it the start of a
+    // chain, `new(Route).Host("x").Subrouter()`: the local has the type the
+    // chain gives, read with its value like any call's result (#3447). So
+    // does one at a line's end, the way gofmt breaks a long chain: the value
+    // is read on past a line that ends at a `.` (#3455).
+    let after = i + 1 + (written?.[0].length ?? 0);
+    if (written && code[after] === '{') after = close.get(after) ?? code.length;
+    do after++; while (code[after] === ' ' || code[after] === '\t');
+    const onward = /\.\s*\S/y;
+    onward.lastIndex = after;
+    const literal = onward.test(code) ? undefined : written?.[1];
     const type = names.length === 1 && literal && !GO_TYPE_KEYWORDS.has(literal) ? literal : undefined;
     const from = /^[ \t]*&?[ \t]*([A-Za-z_]\w*)\.[A-Za-z_]\w*[ \t]*[({]/.exec(rhs)?.[1];
     const call = from ? undefined : /^[ \t]*([A-Za-z_]\w*)[ \t]*(?:\[(?:[^[\]\n]|\[[^[\]\n]*\])*\][ \t]*)?\(/.exec(rhs)?.[1];
@@ -3894,14 +3905,21 @@ function goBlockAt(index: GoScopeIndex, offset: number): [number, number] | null
   return open < 0 ? null : [open, index.close.get(open) ?? index.code.length];
 }
 
-/** Where the statement declaring at `at` ends: its line's end, or a `;`, outside brackets. */
+/** A trailing selector dot does not trigger Go's implicit semicolon. */
+function goContinuesAfterDot(code: string, start: number, newline: number): boolean {
+  let i = newline - 1;
+  while (i >= start && /[ \t\r\n]/.test(code[i]!)) i--;
+  return i >= start && code[i] === '.';
+}
+
+/** Where the declaration ends: a newline or semicolon outside brackets, accounting for line continuations. */
 function goStatementEnd(code: string, at: number): number {
   let depth = 0;
   for (let i = at; i < code.length; i++) {
     const c = code[i];
     if (c === '(' || c === '[' || c === '{') depth++;
     else if (c === ')' || c === ']' || c === '}') { if (--depth < 0) return i; }
-    else if ((c === '\n' || c === ';') && depth === 0) return i;
+    else if (depth === 0 && (c === ';' || (c === '\n' && !goContinuesAfterDot(code, at, i)))) return i;
   }
   return code.length;
 }
@@ -10080,6 +10098,38 @@ function isKotlinTopLevelVisible(n: Node, ref: UnresolvedRef, context: Resolutio
 }
 
 /**
+ * Whether a bare Kotlin supertype name (`: Listener`, `: Listener by impl`) can
+ * mean `candidate`, a Kotlin type, the way Kotlin looks a type name up. A
+ * top-level type is in reach from its own file and package, through an import
+ * of it or a star import of its package, and from Kotlin's default imports. A
+ * type nested in a class is in reach inside that class or a type that inherits
+ * it (kotlinHierarchyAt), or through an import of it or a star import of its
+ * owner. mihon's `FilterList : List<Filter<*>> by list` delegates Kotlin's
+ * `List`, not the `object List` a display mode declares in another module, and
+ * ktor's `DelegateHeaders : Headers` under `import io.ktor.http.*` is that
+ * package's `Headers`, not the JS client's.
+ */
+function isKotlinSupertypeVisible(candidate: Node, ref: UnresolvedRef, context: ResolutionContext): boolean {
+  if (ref.language !== 'kotlin' || candidate.language !== 'kotlin') return true;
+  if (!/^[A-Za-z_]\w*$/.test(ref.referenceName) || candidate.filePath === ref.filePath) return true;
+  const pkg = kotlinFileScope(candidate.filePath, context).pkg;
+  const here = kotlinFileScope(ref.filePath, context);
+  const segs = candidate.qualifiedName.split('::');
+  const path = pkg && segs[0] === pkg ? segs.slice(1) : segs;
+  const fqn = [pkg, ...path].filter((p) => p !== '').join('.');
+  const ownerQn = segs.slice(0, -1).join('::');
+  const owner = path.length > 1
+    ? context.getNodesInFile(candidate.filePath).find((n) => n.qualifiedName === ownerQn && MEMBER_CLASS_KINDS.has(n.kind))
+    : undefined;
+  if (path.length > 1 && !owner) return true;
+  if (owner) {
+    if (kotlinHierarchyAt(ref, context).has(owner.name)) return true;
+    return here.imports.has(fqn) || here.stars.has(fqn.slice(0, fqn.lastIndexOf('.')));
+  }
+  return pkg === here.pkg || here.imports.has(fqn) || here.stars.has(pkg) || KOTLIN_DEFAULT_IMPORTS.has(pkg);
+}
+
+/**
  * Whether a Kotlin method found by its type's name can be called from the
  * reference's file. A member of a class in its file's package (`p::Modes::x`)
  * can; an extension, `fun Modes.hidden()` indexed as `Modes::hidden`, is
@@ -13805,9 +13855,57 @@ function rustBindingType(binding: RustBinding, scopes: RustScopes, ref: Unresolv
     if (!element || !binding.site) return element;
     return binding.site.path === '' && binding.site.index !== undefined ? rustTupleField(element, binding.site.index) : null;
   }
+  if (binding.kind === 'closure') {
+    // `xs.iter().for_each(|x| …)`: what the call hands its closure; `|(k, v)|` a field of that.
+    const item = binding.callee ? rustClosureItem(binding.callee, binding.at, scopes, ref, context, depth) : null;
+    if (!item || !binding.site) return item;
+    return binding.site.path === '' && binding.site.index !== undefined ? rustTupleField(item, binding.site.index) : null;
+  }
   if (binding.init !== undefined) return rustValueType(binding.init, binding.at, scopes, ref, context, depth);
   if (binding.site) return rustSiteType(binding.site, binding.scrutinee, binding.at, scopes, ref, context, depth);
   return null;
+}
+
+/** Std methods whose one-parameter closure is handed an item of what they are called on: an iterator's, an `Option`'s, a `Result`'s `Ok`. */
+const RUST_ITEM_CLOSURES: ReadonlySet<string> = new Set([
+  'map', 'and_then', 'filter', 'for_each', 'try_for_each', 'any', 'all', 'find', 'find_map', 'filter_map', 'flat_map',
+  'position', 'rposition', 'inspect', 'take_while', 'skip_while', 'map_while', 'partition', 'retain', 'retain_mut',
+  'max_by_key', 'min_by_key', 'sort_by_key', 'sort_by_cached_key', 'sort_unstable_by_key', 'dedup_by_key',
+  'is_some_and', 'is_none_or', 'is_ok_and', 'map_or', 'map_or_else',
+]);
+/** Std methods whose one-parameter closure is handed a `Result`'s error. */
+const RUST_ERROR_CLOSURES: ReadonlySet<string> = new Set(['map_err', 'or_else', 'is_err_and', 'inspect_err', 'unwrap_or_else']);
+
+/**
+ * What a closure's only parameter is, from the std method the closure is
+ * handed to and the value that method is called on: `rpc.as_mut()
+ * .is_none_or(|r| …)` with `rpc: Option<Rpc>` an `Rpc`, `self.items.iter()
+ * .for_each(|x| …)` an item of the field, `res.map_err(|e| …)` the `Result`'s
+ * error. Written with no type, such a parameter was unread, and a call on it
+ * stayed unlinked wherever two types share the method's name — the one caller
+ * a change to `Rpc::stop` broke was `|r| r.stop()`, beside a `Control::stop`.
+ *
+ * Only where that value's type is read and is std's own (rustItemOf): a
+ * project type's `map` takes whatever its own signature says. A closure with
+ * more parameters, one bound to a name, or one handed to a free function
+ * never gets here (closureCallee in rust-scopes.ts).
+ */
+function rustClosureItem(callee: RustClosureCallee, at: number, scopes: RustScopes, ref: UnresolvedRef, context: ResolutionContext, depth: number): RustWrittenType | null {
+  if (depth > 3) return null;
+  // `res.map_or_else(|e| …, |v| …)`: the error first, then the value.
+  const side = callee.method === 'map_or_else' ? (callee.arg === 0 ? 'err' : 'ok')
+    : RUST_ERROR_CLOSURES.has(callee.method) ? 'err' : RUST_ITEM_CLOSURES.has(callee.method) ? 'ok' : null;
+  if (!side || (callee.method === 'map_or' && callee.arg !== 1)) return null;
+  if (side === 'ok') {
+    const item = rustIteratedElement(callee.receiver, at, scopes, ref, context, depth);
+    if (item) return item;
+  }
+  const value = rustValueType(callee.receiver, at, scopes, ref, context, depth + 1);
+  const head = value && rustPathHead(value.text.replace(/^(?:&\s*(?:'\w+\s+)?(?:mut\s+)?)+/, ''));
+  if (!value || !head || head.name !== 'Result' || isRustProjectNamed('Result', RUST_DECLARED_TYPE_KINDS, context)) return null;
+  const args = splitRustTopLevel(head.args, ',').map((a) => a.trim()).filter((a) => a !== '' && !a.startsWith("'"));
+  const held = side === 'ok' ? args[0] : args.length === 2 ? args[1] : undefined;
+  return held ? { ...value, text: held, wrappers: undefined } : null;
 }
 
 /** The type of another local, as its binding in scope at `at` writes it. */
@@ -13891,7 +13989,17 @@ function rustValueType(value: string, at: number, scopes: RustScopes, ref: Unres
     if (cloned) return unwrapped(rustLocalType(cloned[1]!, at, scopes, ref, context, depth));
     // `x.m(…)`, `self.m(…)`, `x.m(…)?.n(…)`: what the method it reaches returns.
     const method = /^([\s\S]+?)\s*\.\s*([a-z_]\w*)\s*(?:::\s*<([^()]*)>)?$/.exec(call.callee);
-    return method ? rustMethodReturn(method[1]!, method[2]!, method[3], unwraps, awaits, at, scopes, ref, context, depth) : null;
+    if (!method) return null;
+    const returned = rustMethodReturn(method[1]!, method[2]!, method[3], unwraps, awaits, at, scopes, ref, context, depth);
+    if (returned || awaits > 0 || call.args.trim() !== '' || !RUST_SAME_SHAPE_ADAPTERS.has(method[2]!)) return returned;
+    // `opt.as_mut()`, `res.as_ref()`, `opt.take()`: std's own, and still the
+    // `Option` or `Result` it is called on, borrowed or moved out.
+    const held = rustValueType(method[1]!, at, scopes, ref, context, depth + 1);
+    // Read past the borrow it is held through: `rpc: &mut Option<Rpc>`.
+    const bare = held ? held.text.replace(/^(?:&\s*(?:'\w+\s+)?(?:mut\s+)?)+/, '') : '';
+    const head = held && rustPathHead(bare);
+    if (!held || !head || (head.name !== 'Option' && head.name !== 'Result') || isRustProjectNamed(head.name, RUST_DECLARED_TYPE_KINDS, context)) return null;
+    return unwrapped({ ...held, text: bare });
   }
   // `self.items`, `opts.config.port`, `pair.0`: the field's type as its struct declares it.
   const access = /^([\s\S]+?)\s*\.\s*([A-Za-z_]\w*|\d+)$/.exec(v);
@@ -13915,6 +14023,9 @@ function rustValueType(value: string, at: number, scopes: RustScopes, ref: Unres
   }
   return null;
 }
+
+/** Std methods of `Option` and `Result` that hand back the same `Option` or `Result`: borrowed, dereferenced, copied or taken. */
+const RUST_SAME_SHAPE_ADAPTERS: ReadonlySet<string> = new Set(['as_mut', 'as_ref', 'as_deref', 'as_deref_mut', 'take', 'cloned', 'copied']);
 
 /** Where a node starts in its file, as an offset into rustScopesOf's text. */
 function rustNodeOffset(n: Node, context: ResolutionContext): number {
@@ -16066,6 +16177,9 @@ export function matchByExactName(
     // Likewise a bare Java type name: retrofit's tests' `new Builder()` is not
     // a wire converter test's nested `CrashingPhone.Builder`.
     isJavaTypeVisible(n, ref, context) &&
+    // And a bare Kotlin supertype, a type the file can see the way Kotlin looks
+    // one up: a `List<T> by list` is Kotlin's `List`, not a sealed class's `object List`.
+    !(inheritanceRef && !isKotlinSupertypeVisible(n, ref, context)) &&
     // And a Go name that isn't exported, only its own package's: prometheus
     // tsdb's `[]*memSeries` is head.go's, not `tsdb/agent`'s, which scored the
     // same (a child package's directory shares as much of the path) and won.
@@ -16134,6 +16248,14 @@ export function matchByExactName(
       return { original: ref, targetNodeId: member.id, confidence: 0.9, resolvedBy: 'exact-match' };
     }
     pool = overloads;
+  }
+  // A Pascal call written through a receiver is not the routine making it
+  // (matchReference drops that answer): SynEdit's `Attribute[i].Assign(…)`
+  // in `TSynCustomHighlighter.Assign`, whose node now spans the call (#3453),
+  // is one of the others.
+  if (ref.language === 'pascal' && pool.length > 1 && pool.some((c) => c.id === ref.fromNodeId) &&
+      isCollapsedNonRecursion(ref, context)) {
+    pool = pool.filter((c) => c.id !== ref.fromNodeId);
   }
 
   // Ubiquitous-name ceiling (#999): above it, picking one target among K
@@ -24966,6 +25088,8 @@ function enclosingScopeStartLine(ref: UnresolvedRef, context: ResolutionContext)
   for (const n of context.getNodesInFile(ref.filePath)) {
     if (n.kind !== 'function' && n.kind !== 'method') continue;
     if (n.language !== ref.language) continue;
+    // Pascal fields precede separately implemented methods; only nested routines bound this scan.
+    if (n.language === 'pascal' && (n.kind !== 'function' || !n.qualifiedName.includes('::'))) continue;
     const end = n.endLine ?? n.startLine;
     if (n.startLine <= ref.line && end >= ref.line && n.startLine >= start) {
       start = n.startLine;
@@ -30644,8 +30768,9 @@ function goMethodOnElement(t: GoTypeText, ref: UnresolvedRef, context: Resolutio
 /**
  * Whether the value a Go declaration gives its name is a call or a
  * conversion: `f(…)`, `pkg.F(…)`, `x.M(…)`, `T(x)`, `a.b().C(…)`, alone or
- * as this name's place among several values (`a, b := f(), g()`). Not a
- * `range` clause, a builtin's `make`/`new`/`append`, an assertion
+ * as this name's place among several values (`a, b := f(), g()`), a chain
+ * from a builtin's call too (`new(T).M()`). Not a `range` clause, a
+ * builtin's `make`/`new`/`append` that is the whole value, an assertion
  * (goAssertedLocalType reads those) or a type switch's guard.
  */
 function goValueIsCall(local: GoDecl, index: GoScopeIndex): boolean {
@@ -30658,7 +30783,10 @@ function goValueIsCall(local: GoDecl, index: GoScopeIndex): boolean {
   // A type switch's guard (`switch v := x.(type)`) has each case's type, and
   // an assertion (`v := x.(T)`) is goAssertedLocalType's to read.
   if (/\.\s*\([^()]*(?:\([^()]*\)[^()]*)*\)\s*$/.test(value)) return false;
-  return /^\s*[A-Za-z_(][\s\S]*\)\s*$/.test(value) && !/^\s*(?:new|make|append)\s*\(/.test(value);
+  // A builtin's call that is the whole value; a chain from one is a call (#3447).
+  const builtin = /^\s*(?:new|make|append)\s*\(/.exec(value);
+  if (builtin && goClosingBracket(value, builtin[0].length - 1) === value.trimEnd().length - 1) return false;
+  return /^\s*[A-Za-z_(][\s\S]*\)\s*$/.test(value);
 }
 
 /**
@@ -31049,11 +31177,11 @@ function goExprType(
     if (!t) return t;
     return t.text.startsWith('*') ? { ...t, text: t.text.slice(1) } : undefined;
   }
-  // `make(T, …)`, `new(T)`, `append(xs, …)`.
+  // `make(T, …)`, `new(T)`, `append(xs, …)`; a chain from one (`new(T).M()`)
+  // is read with the chains below.
   const builtin = /^(make|new|append)\s*\(/.exec(s);
-  if (builtin) {
+  if (builtin && goClosingBracket(s, builtin[0].length - 1) === s.length - 1) {
     const open = builtin[0].length - 1;
-    if (goClosingBracket(s, open) !== s.length - 1) return undefined;
     const first = goSplitTopLevel(s.slice(open + 1, -1), ',')[0]?.trim();
     if (!first) return undefined;
     if (builtin[1] === 'make') return goTypeTextAt(first, filePath, at, index, context);
@@ -31487,7 +31615,7 @@ function goHeaderValueEnd(code: string, at: number): number {
     const c = code[i];
     if (c === '(' || c === '[') depth++;
     else if (c === ')' || c === ']') { if (--depth < 0) return i; }
-    else if (depth === 0 && (c === ';' || c === '{' || c === '\n')) return i;
+    else if (depth === 0 && (c === ';' || c === '{' || (c === '\n' && !goContinuesAfterDot(code, at, i)))) return i;
   }
   return code.length;
 }
@@ -36071,7 +36199,9 @@ export function matchFuzzy(
     !(finalCandidates[0]!.kind !== 'function' && isBarePhpCall(ref, context)) &&
     isLexicallyReachable(finalCandidates[0]!, ref, context) &&
     // Nor another Ruby test suite's: its declarations exist only in its runs.
-    !(ref.language === 'ruby' && finalCandidates[0]!.language === 'ruby' && !isRubyDeclarationVisible(finalCandidates[0]!, ref.filePath))
+    !(ref.language === 'ruby' && finalCandidates[0]!.language === 'ruby' && !isRubyDeclarationVisible(finalCandidates[0]!, ref.filePath)) &&
+    // Nor a Kotlin type the supertype written here can't see.
+    !(isInheritanceRef(ref) && !isKotlinSupertypeVisible(finalCandidates[0]!, ref, context))
   ) {
     const isCrossLanguage = !sameLanguageFamily(finalCandidates[0]!.language, ref.language);
     return {

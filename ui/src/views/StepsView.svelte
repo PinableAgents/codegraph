@@ -14,21 +14,15 @@
   or a Flow strip between two steps.
 -->
 <script lang="ts">
-  import { selectDropdown } from '../lib/dropdown';
-  import { graphStatus } from '../lib/graph-status.svelte';
-  import SymbolPicker from '../components/graph/SymbolPicker.svelte';
-  import { readGraphHistory, saveGraphHistory } from '../lib/graph-history';
-  import VirtualList from '../components/graph/VirtualList.svelte';
-  import BudgetNotice from '../components/graph/BudgetNotice.svelte';
-  import { graphText } from '../lib/graph-copy';
-  import DetailPanel from '../components/graph/DetailPanel.svelte';
-  import { untrack } from 'svelte';
-  import { programBudget } from '../lib/graph-budget';
-  import { requestLayout } from '../lib/graph-layout';
-  import GraphCanvas from '../components/graph/GraphCanvas.svelte';
-  import { graphScene } from '../lib/graph-adapters';
-  import type { Node, Edge } from '../lib/graph-scene';
+  import { SvelteFlow, Controls, type Node, type Edge, type Viewport } from '@xyflow/svelte';
+  import '@xyflow/svelte/dist/style.css';
+  import StepNode from '../components/steps/StepNode.svelte';
+  import StepStubs from '../components/steps/StepStubs.svelte';
+  import ForkPoint from '../components/steps/ForkPoint.svelte';
+  import DecisionCaption from '../components/steps/DecisionCaption.svelte';
+  import RegionCaption from '../components/steps/RegionCaption.svelte';
   import StepsKey from '../components/steps/StepsKey.svelte';
+  import ScreenEdge from '../components/screens/ScreenEdge.svelte';
   import KindGlyph from '../components/KindGlyph.svelte';
   import {
     canDrawSteps,
@@ -40,23 +34,24 @@
     type WireStepLink,
     type WireStepsPayload,
   } from '../lib/api';
-  import { i18n } from '../lib/i18n.svelte';
   import { live } from '../lib/live.svelte';
   import { fileHref, flowHref, navigate, stepsHref, symbolHref } from '../lib/navigation';
   import type { MapEdgeLayout } from '../lib/map-model';
-  import { hoverPill, placeLabels } from '../lib/screens-model';
+  import { hoverPill, nearestEdge, placeLabels } from '../lib/screens-model';
   import { commonTokens, conditionTokens, restTokens, scenarios, whenWords, type WordToken } from '../lib/conditions';
   import {
+    buildStepsModel,
     kindWord,
     kindWords,
     selectionReach,
+    stepEdgeVisible,
     stepNeighbourhood,
     stepPairId,
     stepViaText,
     triggerWords,
     type StepsModel,
   } from '../lib/steps-model';
-
+  import { buildOrderModel } from '../lib/program-model';
 
   interface Props {
     anchor: string | null;
@@ -73,10 +68,7 @@
   }
   let { anchor, symbol, depth, through, reading }: Props = $props();
 
-  let visibleCounts = $state<{nodes:number;edges:number}|null>(null);
   let payload = $state<WireStepsPayload | null>(null);
-  let anchorChoice = $state('');
-  let retry = $state(0);
   let error = $state<string | null>(null);
   let loading = $state(true);
   let selected = $state<string | null>(null);
@@ -84,6 +76,8 @@
   /** The panel row under the pointer: its edge on the canvas, and the one link it names. */
   let panelHot = $state<{ edge: string; link: WireStepLink } | null>(null);
   let stage = $state<HTMLDivElement | null>(null);
+  let viewport = $state<Viewport | undefined>(undefined);
+  const HOVER_REACH = 10;
 
   /** The chooser's lists, when the view opens without an anchor: the screens of an app, else the endpoints of an API. */
   let screens = $state<WireScreen[] | null>(null);
@@ -114,9 +108,9 @@
   let legendOpen = $state(readLegendOpen());
   function readLegendOpen(): boolean {
     try {
-      return localStorage.getItem(LEGEND_KEY) === 'open';
+      return localStorage.getItem(LEGEND_KEY) !== 'closed';
     } catch {
-      return false;
+      return true;
     }
   }
   $effect(() => {
@@ -127,7 +121,11 @@
     }
   });
 
+  const nodeTypes = { step: StepNode, region: RegionCaption, fork: ForkPoint, decision: DecisionCaption, stubs: StepStubs };
 
+  /** Two clicks on one box closer than this are a double-click. */
+  const DOUBLE_CLICK_MS = 400;
+  let lastClick: { id: string; at: number } | null = null;
   /** Start the picture at a step — the panel's *Start here →*. False for a step with no symbol, or the anchor. */
   function startHere(id: string): boolean {
     const step = model?.nodes.get(id)?.step;
@@ -135,13 +133,13 @@
     navigate(stepsHref({ anchor: step.node.id }));
     return true;
   }
+  const edgeTypes = { screen: ScreenEdge };
   const DEPTHS = [4, 6, 8, 10, 12];
 
   const asked = $derived(anchor !== null || symbol !== null);
   const supported = canDrawSteps();
 
   $effect(() => {
-    void retry;
     void live.indexTick;
     const request =
       anchor !== null
@@ -150,6 +148,7 @@
           ? { symbol, depth: depth ?? undefined, through }
           : null;
     const controller = new AbortController();
+    selected = null;
     hovered = null;
     panelHot = null;
     if (request === null) {
@@ -158,7 +157,6 @@
       error = null;
       fetchScreens(controller.signal)
         .then(async (next) => {
-          if (controller.signal.aborted) return;
           screens = next.routed ? next.screens : [];
           // No screens: an API's endpoints are its places to start from.
           if (next.routed) {
@@ -166,11 +164,9 @@
             return;
           }
           const found = await fetchRoutes({ limit: 300 }, controller.signal);
-          if (controller.signal.aborted) return;
           routes = found.routed ? found.entries : [];
         })
         .catch(() => {
-          if (controller.signal.aborted) return;
           screens = screens ?? [];
           routes = routes ?? [];
         });
@@ -180,7 +176,6 @@
     error = null;
     fetchSteps(request, controller.signal)
       .then((next) => {
-        if (controller.signal.aborted) return;
         payload = next;
         loading = false;
       })
@@ -205,16 +200,9 @@
    * rows are how much has already happened, in the tree it means "leads to" and
    * the rows are distance from the anchor.
    */
-  let computedModel = $state<StepsModel | null>(null);
-  const model = $derived(computedModel);
-  const localBudget = $derived(payload ? programBudget(payload.steps.length, payload.links.length, readAs === 'order' ? payload.program?.root : undefined) : null);
-  const budget = $derived((payload as (typeof payload & { budget?: { nodes: number; edges: number; exceeded: boolean } }))?.budget ?? localBudget);
-  $effect(() => {
-    const next = payload; const options = { readAs };
-    if (!next || budget?.exceeded) { computedModel = null; return; }
-    return requestLayout<StepsModel>('steps', $state.snapshot(next), options, result => computedModel = result, message => error = message);
-  });
-
+  const model = $derived<StepsModel | null>(
+    payload === null ? null : (readAs === 'order' ? buildOrderModel(payload) : null) ?? buildStepsModel(payload)
+  );
   /** The order can be asked for and have nothing to read: the view then says so. */
   const orderReadable = $derived(payload?.program != null);
 
@@ -233,7 +221,11 @@
    * to `string` it silently fails to typecheck against the very option it is
    * written for.
    */
-
+  const fitOptions = $derived(
+    model !== null && model.layout.nodes.length <= 24 && legendOpen
+      ? { padding: { left: '440px', top: '32px', right: '32px', bottom: '32px' } as const, maxZoom: 1, minZoom: 0.4 }
+      : { padding: 0.1, maxZoom: 1, minZoom: model !== null && model.regions !== null ? 0.2 : 0.4 }
+  );
 
   /** The selection with the decision points it touches — what the edge filter and the dimming reason over. */
   const reach = $derived(model === null || selected === null ? null : selectionReach(model, selected));
@@ -278,7 +270,7 @@
       draggable: false,
       selectable: false,
       connectable: false,
-      data: { label: zone.label, width: zone.width,relatedIds:model.layout.nodes.filter(n=>n.x>=zone.x&&n.x<zone.x+zone.width&&n.y>=zone.y&&n.y<zone.y+zone.height).map(n=>n.id) },
+      data: { label: zone.label, width: zone.width },
     }));
     // A decision made inside a box, said once under it; each line out of that
     // box says only which way it is.
@@ -291,7 +283,27 @@
         draggable: false,
         selectable: false,
         connectable: false,
-        data: { label: d.label, width: d.width, owner,dimmed: neighbours !== null && !neighbours.has(owner) },
+        data: { label: d.label, width: d.width, dimmed: neighbours !== null && !neighbours.has(owner) },
+      });
+    }
+    // A box's far links, said in words in the gap under it. Not while it is
+    // selected: then every one of its real lines is drawn, and the words would
+    // be saying a second time what the reader can now see.
+    for (const node of model.layout.nodes) {
+      const list = model.stubs.get(node.id);
+      if (list === undefined || list.length === 0 || selected === node.id) continue;
+      captions.push({
+        id: `stubs:${node.id}`,
+        type: 'stubs',
+        position: { x: node.x, y: node.y + node.height },
+        draggable: false,
+        selectable: false,
+        connectable: false,
+        data: {
+          stubs: list,
+          width: node.width,
+          dimmed: neighbours !== null && !neighbours.has(node.id),
+        },
       });
     }
     return captions.concat(model.layout.nodes.map((node) => {
@@ -323,10 +335,23 @@
           selected: selected === node.id,
           dimmed: neighbours !== null && !neighbours.has(node.id),
           onSelect: (id: string) => {
-            selected = id;
+            // Two clicks on the same box within a beat are a double-click:
+            // the picture starts there. Read here rather than off the DOM's
+            // `dblclick`, which the flow canvas does not always pass on.
+            const now = performance.now();
+            if (lastClick !== null && lastClick.id === id && now - lastClick.at < DOUBLE_CLICK_MS) {
+              lastClick = null;
+              if (startHere(id)) return;
+            }
+            lastClick = { id, at: now };
+            selected = selected === id ? null : id;
             hovered = null;
             panelHot = null;
           },
+          // Double-click: the picture starts here — an endpoint or another
+          // screen drawn as a boundary opens as its own chapter. An effect has
+          // no symbol to start from.
+          ...(model.nodes.get(node.id)?.step.node && !model.nodes.get(node.id)?.step.anchor ? { onStart: startHere } : {}),
         },
       };
     }));
@@ -336,7 +361,7 @@
     if (model === null) return [];
     const focus = focusId;
     return model.layout.edges
-
+      .filter((edge) => stepEdgeVisible(model, edge, selected, reach ?? undefined))
       .map((edge) => {
         const touches =
           reach !== null && (reach.has(edge.source) || reach.has(edge.target));
@@ -371,6 +396,10 @@
   const selectedInfo = $derived(selected === null || model === null ? null : (model.nodes.get(selected) ?? null));
   const lists = $derived(selected === null || payload === null ? null : stepNeighbourhood(payload, selected));
   const hoveredInfo = $derived(hovered === null || model === null ? null : (model.edges.get(hovered.edge.id) ?? null));
+  const edgeById = $derived(
+    model === null ? new Map<string, MapEdgeLayout>() : new Map(model.layout.edges.map((e) => [e.id, e]))
+  );
+  const visibleIds = $derived(new Set(edges.map((e) => e.id)));
 
   /** The same picture with one setting changed: the anchor as the URL asked for it, the rest kept. */
   function rewrite(changes: { depth?: number; through?: boolean; view?: 'order' | 'tree' }): string {
@@ -398,9 +427,39 @@
     };
   }
 
+  function onStageMove(event: MouseEvent): void {
+    if (model === null || stage === null) return;
+    const target = event.target as Element | null;
+    if (target?.closest('.spill')) return;
+    if (target?.closest('.snode, .legend, .tip, .svelte-flow__controls')) {
+      hovered = null;
+      return;
+    }
+    const view = viewport ?? readViewport();
+    if (!view) return;
+    const box = stage.getBoundingClientRect();
+    const point = {
+      x: (event.clientX - box.left - view.x) / view.zoom,
+      y: (event.clientY - box.top - view.y) / view.zoom,
+    };
+    const hit = nearestEdge(model, point, visibleIds, HOVER_REACH / view.zoom);
+    const edge = hit === null ? undefined : edgeById.get(hit.id);
+    if (!edge) {
+      hovered = null;
+      return;
+    }
+    hovered = {
+      edge,
+      x: Math.min(event.clientX - box.left + 14, box.width - 420),
+      y: event.clientY - box.top + 14,
+    };
+  }
 
-
-
+  function readViewport(): Viewport | null {
+    const el = stage?.querySelector<HTMLElement>('.svelte-flow__viewport');
+    const m = el?.style.transform.match(/translate\(([-\d.]+)px,\s*([-\d.]+)px\)\s*scale\(([-\d.]+)\)/);
+    return m ? { x: Number(m[1]), y: Number(m[2]), zoom: Number(m[3]) } : null;
+  }
 
   function onRowHover(link: WireStepLink | null): void {
     const edge = link === null ? null : stepPairId(link);
@@ -445,68 +504,42 @@
   function siteWords(site: { text: string; args?: string }): string {
     return site.args === undefined ? site.text : `${site.text}(${site.args})`;
   }
-  let selectionNotice = $state('');
-  $effect(() => {
-    const ids = model ? [...model.nodes.keys()] : null;
-    if (ids && selected && !ids.includes(selected)) { selected = null; selectionNotice = graphText('索引或筛选已变化，原选中节点不在当前图中。', 'The index or filters changed; the previous selection is no longer in this graph.'); }
-  });
-  const stateKey = typeof location === 'undefined' ? '' : location.href;
-  const restored = untrack(() => readGraphHistory(stateKey));
-  if (restored.selected) selected = restored.selected;
-  $effect(() => saveGraphHistory(stateKey, { selected }));
-
-  $effect(() => {
-    if (!payload) return;
-    return graphStatus.set({ nodes: visibleCounts?.nodes ?? nodes.length, edges: visibleCounts?.edges ?? edges.length, scope: payload.anchor.name, filter: `${readAs} · ${graphText('深度', 'Depth')} ${depth ?? payload.depth} · through=${through}`, excluded: payload.truncated?.hubs ? `${payload.truncated.hubs} ${graphText('高扇出边界', 'fan-out boundaries')}` : undefined,
-      budget: budget?.exceeded ? graphText('超过画布预算，请缩小范围', 'Canvas budget exceeded; narrow scope') : '400 / 2000',
-    });
-  });
-  const canvasScene = $derived(graphScene('steps', nodes, edges, {},
-    payload?.links.map(link => ({ id: link.id, source: link.from, target: link.to })),
-    (model?.regions ?? []).map(zone => ({ id: 'zone:' + zone.id, label: zone.label,
-      members: nodes.filter(n => n.position.x >= zone.x && n.position.x < zone.x + zone.width && n.position.y >= zone.y && n.position.y < zone.y + zone.height).map(n => n.id) }))));
 </script>
 
 {#snippet words(tokens: WordToken[])}
   {#each tokens as t, i (i)}{#if i > 0}{' '}{/if}{#if t.kw}<b class="kw">{t.text}</b>{:else}{t.text}{/if}{/each}
 {/snippet}
 
-<div class="graph-shell">
-{#if selectionNotice}<div role="status">{selectionNotice}</div>{/if}
-<div class="scopebar" role="toolbar" aria-label={graphText('步骤图范围', 'Steps scope')}>
-  <SymbolPicker label={graphText('更换起点', 'Change anchor')} bind:value={anchorChoice} />
-  <button disabled={!anchorChoice} onclick={() => navigate(stepsHref({ anchor: anchorChoice, depth: depth ?? undefined, through, view: readAs }))}>{graphText('应用起点', 'Use anchor')}</button>
-  <span>{graphText('固定起点：', 'Fixed anchor: ')}{payload?.anchor.name ?? symbol ?? anchor ?? graphText('请选择起点', 'Choose an anchor')}</span>
-  <label>{graphText('深度', 'Depth')} <select use:selectDropdown value={depth ?? payload?.depth ?? 6} onchange={e => navigate(rewrite({ depth: Number(e.currentTarget.value) }))}>{#each DEPTHS as d}<option value={d}>{d}</option>{/each}</select></label>
-  <label>{graphText('阅读', 'Reading')} <select use:selectDropdown value={readAs} onchange={e => navigate(rewrite({ view: e.currentTarget.value as 'order' | 'tree' }))}><option value="order">{graphText('代码顺序', 'Code order')}</option><option value="tree">{graphText('影响树', 'Impact tree')}</option></select></label>
-  <label><input type="checkbox" checked={through} onchange={e => navigate(rewrite({ through: e.currentTarget.checked }))} />{graphText('穿过页面边界', 'Continue through screens')}</label>
-  <button disabled={!selected} onclick={() => selected && startHere(selected)}>{graphText('以选中节点为起点', 'Start from selection')}</button>
-</div>
 <div class="steps">
-  <div class="stage" bind:this={stage} role="presentation" onmouseleave={() => (hovered = null)}>
-    {#if error && model}<div class="retry-banner" role="alert">{error} <button onclick={() => retry++}>{graphText('重试', 'Retry')}</button></div>{/if}
+  <div class="stage" bind:this={stage} role="presentation" onmousemove={onStageMove} onmouseleave={() => (hovered = null)}>
     {#if !supported}
       <div class="state">
-        <h2>{i18n.t('steps.cannotDraw')}</h2>
-        <p>{i18n.t('steps.cannotDrawDetail')}</p>
+        <h2>This viewer cannot draw steps</h2>
+        <p>The host it runs in has not wired the steps question. The Screens and Flow views still work.</p>
       </div>
     {:else if !asked}
       <div class="state chooser">
-        <h2>{i18n.t('steps.fromWhere')}</h2>
+        <h2>What happens from where?</h2>
         {#if chooser === 'routes'}
           <p>
-            {i18n.t('steps.pickEndpoint')} <i>{i18n.t('steps.whatHappensHere')}</i>.
+            Pick an endpoint and this view draws everything it sets in motion — its handler and what runs
+            before it, the calls into the database, a queue, another service, and every response it can
+            send — one box per step, an arrow for every way one leads to the next, and on each arrow the
+            condition under which it happens. Or search a symbol and choose <i>What happens from here</i>.
           </p>
         {:else}
           <p>
-            {i18n.t('steps.pickScreen')} <i>{i18n.t('steps.whatHappensHere')}</i>.
+            Pick a screen and this view draws everything it sets in motion — its handlers, the calls that
+            cross into native code, the events that come back, the state it writes, the requests that leave
+            the app — one box per step, an arrow for every way one leads to the next, and on each arrow the
+            condition under which it happens. Or search a symbol and choose <i>What happens from here</i>.
           </p>
         {/if}
         {#if chooser === null}
-          <p class="dim">{screens === null ? i18n.t('steps.readingScreens') : i18n.t('steps.readingEndpoints')}</p>
+          <p class="dim">Reading {screens === null ? 'screens' : 'endpoints'}…</p>
         {:else if chooser === 'none'}
           <p class="dim">
-            {i18n.t('steps.noTargets')} <i>{i18n.t('steps.whatHappensHere')}</i>,
+            No screens or endpoints in this graph. Open a symbol from the search box and follow <i>What happens from here</i>,
             or link here directly with <span class="mono">#/steps?symbol=&lt;name&gt;</span>.
           </p>
         {:else if chooser === 'screens' && screens !== null}
@@ -530,12 +563,10 @@
           {/each}
         {/if}
       </div>
-    {:else if budget?.exceeded}
-      <BudgetNotice nodes={budget.nodes} edges={budget.edges} />
-    {:else if error !== null && model === null}
+    {:else if error !== null}
       <div class="state">
         <h2>The steps could not be read</h2>
-        <p>{error}</p><button onclick={() => retry++}>{graphText('重试', 'Retry')}</button>
+        <p>{error}</p>
       </div>
     {:else if loading && payload === null}
       <div class="state"><p class="dim">Walking from the anchor…</p></div>
@@ -549,8 +580,29 @@
         <p><a class="pick" href={rewrite({ view: 'tree' })}>What it sets in motion →</a></p>
       </div>
     {:else if model !== null && payload !== null}
-      <GraphCanvas scene={canvasScene} onVisibleChange={counts=>visibleCounts=counts} {selected}
-        onSelect={id => { selected = id; hovered = null; panelHot = null; }} />
+      <SvelteFlow
+        {nodes}
+        {edges}
+        {nodeTypes}
+        {edgeTypes}
+        fitView
+        fitViewOptions={fitOptions}
+        bind:viewport
+        minZoom={0.2}
+        maxZoom={3}
+        nodesDraggable={false}
+        nodesConnectable={false}
+        elementsSelectable={false}
+        panOnDrag
+        proOptions={{ hideAttribution: true }}
+        onpaneclick={() => {
+          selected = null;
+          hovered = null;
+          panelHot = null;
+        }}
+      >
+        <Controls position="bottom-right" showLock={false} />
+      </SvelteFlow>
 
 
       {#if hovered !== null && hoveredInfo !== null}
@@ -585,7 +637,7 @@
   </div>
 
   {#if payload !== null && model !== null}
-    <DetailPanel><aside class="side">
+    <aside class="side">
       {#if selectedInfo !== null && lists !== null}
         <div class="head">
           <div>
@@ -621,9 +673,9 @@
           <button class="clear" onclick={() => (selected = null)}>clear</button>
         </div>
         {#if selectedInfo.step.cut === 'screen'}
-          <p class="dim note">Another {kindWord('screen', payload.project, selectedInfo.step)} — a chapter of its own. Start here to see what happens on it, or continue through {kindWords('screen', payload.project)[1]} from the summary.</p>
+          <p class="dim note">Another {kindWord('screen', payload.project, selectedInfo.step)} — a chapter of its own. Start here (or double-click its box) to see what happens on it, or continue through {kindWords('screen', payload.project)[1]} from the summary.</p>
         {:else if selectedInfo.step.cut === 'component'}
-          <p class="dim note">The event lands in a component of another screen — a picture of its own. Start here to see it, or continue through screens from the summary.</p>
+          <p class="dim note">The event lands in a component of another screen — a picture of its own. Start here (or double-click its box) to see it, or continue through screens from the summary.</p>
         {:else if selectedInfo.step.cut !== null}
           <p class="dim note">
             The walk was cut at this step ({selectedInfo.step.cut === 'depth'
@@ -655,9 +707,9 @@
         {#if lists.arrivesFrom.length === 0}
           <p class="dim">{selectedInfo.step.anchor ? 'The anchor — the picture starts here.' : 'Nothing in the picture leads here.'}</p>
         {/if}
-        <VirtualList items={lists.arrivesFrom} rowHeight={100}>{#snippet row(link)}
+        {#each lists.arrivesFrom as link (link.id)}
             {@const sc = scenarios(link.sites)}
-            {@const fallback = payload?.steps.find((s) => s.id === link.from)?.node?.id ?? null}
+            {@const fallback = payload.steps.find((s) => s.id === link.from)?.node?.id ?? null}
           <div
             class="row"
             class:hot={rowHot(link)}
@@ -690,7 +742,7 @@
             {/each}
             {#if stripHref(link)}<a class="site act" href={stripHref(link)}>Open as a flow →</a>{/if}
           </div>
-        {/snippet}</VirtualList>
+        {/each}
 
         <h4>Leads to <span class="dim">{lists.leadsTo.length}</span></h4>
         {#if lists.leadsTo.length === 0}
@@ -702,7 +754,7 @@
                 : 'Nothing the walk follows leaves this step.'}
           </p>
         {/if}
-        <VirtualList items={lists.leadsTo} rowHeight={100}>{#snippet row(link)}
+        {#each lists.leadsTo as link (link.id)}
             {@const sc = scenarios(link.sites)}
             {@const fallback = selectedInfo.step.screen?.component?.id ?? selectedInfo.step.node?.id ?? null}
           <div
@@ -737,7 +789,7 @@
             {/each}
             {#if stripHref(link)}<a class="site act" href={stripHref(link)}>Open as a flow →</a>{/if}
           </div>
-        {/snippet}</VirtualList>
+        {/each}
       {:else}
         <div class="head">
           <div>
@@ -758,6 +810,31 @@
             {/each}
           </p>
         {/if}
+        <p class="reading">
+          Read as:
+          <a class="tab" class:on={readAs === 'order'} href={rewrite({ view: 'order' })}>in order</a>
+          <a class="tab" class:on={readAs === 'tree'} href={rewrite({ view: 'tree' })}>what it sets in motion</a>
+        </p>
+        <p>
+          <b>{payload.steps.length}</b> steps · <b>{payload.links.length}</b> links · depth
+          <select
+            class="depth"
+            value={String(payload.depth)}
+            onchange={(e) => navigate(rewrite({ depth: Number((e.currentTarget as HTMLSelectElement).value) }))}
+          >
+            {#each DEPTHS as d (d)}
+              <option value={String(d)}>{d}</option>
+            {/each}
+            {#if !DEPTHS.includes(payload.depth)}<option value={String(payload.depth)}>{payload.depth}</option>{/if}
+          </select>
+        </p>
+        <p>
+          <label class="opt">
+            <input type="checkbox" checked={payload.through} onchange={(e) => navigate(rewrite({ through: (e.currentTarget as HTMLInputElement).checked }))} />
+            Continue through {kindWords('screen', payload.project)[1]}
+          </label>
+          <span class="dim">— otherwise another {kindWord('screen', payload.project)} is drawn as a boundary, and is a click from being the next anchor.</span>
+        </p>
         <p class="counts">
           {#each ['screen', 'trigger', 'bridge', 'event', 'store', 'effect'] as const as kind (kind)}
             {#if model.counts[kind] > 0}
@@ -806,35 +883,46 @@
           <button class="peer mono" onclick={() => (selected = step.id)}>{model.nodes.get(step.id)?.label ?? step.label} <span class="dim sans">{kindWord(step.kind, payload.project, step)}</span></button>
         {/each}
       {/if}
-    </aside></DetailPanel>
+    </aside>
   {/if}
 </div>
 
-</div>
-
 <style>
-  .retry-banner{position:absolute;top:60px;left:12px;right:12px;z-index:12;background:var(--paper-2);border:1px solid var(--rule);padding:10px;font:12px var(--sans)}
-  .graph-shell{display:flex;flex-direction:column;height:100%;min-height:0;overflow:hidden}
-  .scopebar{flex:none}
-  .scopebar{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:10px 16px;border-bottom:1px solid var(--rule);background:var(--paper-2);font:14px var(--sans)}
-  .scopebar label{display:flex;align-items:center;gap:5px}.scopebar select,.scopebar button{min-height:36px;border:1px solid var(--rule);background:var(--paper);color:var(--ink);font:inherit;padding:4px}
-
   .steps {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    position: relative;
-    height: auto;
-    flex: 1;
+    grid-template-columns: minmax(600px, 1fr) 340px;
+    height: 100%;
     min-height: 0;
   }
   .stage {
     position: relative;
     overflow: hidden;
-    background-color: var(--paper);
-    background-image:
-      linear-gradient(var(--route-grid) 1px, transparent 1px),
-      linear-gradient(90deg, var(--route-grid) 1px, transparent 1px);
-    background-size: 24px 24px;
+    background: var(--paper);
+  }
+  .stage :global(.svelte-flow) {
+    background: var(--paper);
+  }
+  .stage :global(.svelte-flow__handle) {
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+    min-width: 0;
+    min-height: 0;
+    border: 0;
+    pointer-events: none;
+  }
+  .stage :global(.svelte-flow__edge-labels) {
+    pointer-events: none;
+  }
+  .stage :global(.svelte-flow__controls-button) {
+    background: var(--paper);
+    border: 0;
+    border-bottom: 1px solid var(--rule-soft);
+    border-radius: 0;
+    color: var(--ink-2);
+  }
+  .stage :global(.svelte-flow__controls-button svg) {
+    fill: var(--ink-2);
   }
   .state {
     padding: 48px 40px;
@@ -886,9 +974,9 @@
     z-index: 5;
     width: 400px;
     padding: 8px 10px;
-    border: 1px solid var(--route-main);
-    background: var(--paper-2);
-    box-shadow: inset 3px 0 0 var(--route-main);
+    border: 1px solid var(--ink);
+    background: var(--paper);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
     font-size: 12px;
     pointer-events: none;
     /* A call with its arguments is one long token: it wraps inside the box. */
@@ -909,12 +997,10 @@
     border-top: 1px solid var(--rule-soft);
   }
   .side {
-    border-left: 1px solid var(--route-branch);
+    border-left: 1px solid var(--rule);
     padding: 14px 16px;
     overflow: auto;
     font-size: 12.5px;
-    background: var(--paper-2);
-    box-shadow: inset 3px 0 0 color-mix(in srgb, var(--route-branch) 28%, transparent);
   }
   .head {
     display: flex;
@@ -926,8 +1012,6 @@
   .big {
     font-size: 15px;
     font-weight: 600;
-    padding-left: 8px;
-    border-left: 3px solid var(--route-main);
     /* An effect's label is a call with its arguments — one long token. */
     overflow-wrap: anywhere;
   }
@@ -943,7 +1027,7 @@
     text-decoration: underline;
   }
   .act {
-    color: var(--accent-ink);
+    color: var(--accent);
   }
   .clear {
     border: 1px solid var(--rule);
@@ -956,6 +1040,45 @@
   }
   .note {
     margin: 0 0 6px;
+  }
+  .opt {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+  }
+  .opt input {
+    margin: 0;
+    accent-color: var(--accent);
+  }
+  .reading {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    color: var(--ink-3);
+  }
+  .tab {
+    color: var(--ink-2);
+    text-decoration: none;
+    border-bottom: 1px solid var(--rule-soft);
+    padding-bottom: 1px;
+  }
+  .tab:hover {
+    color: var(--ink);
+    border-bottom-color: var(--ink-3);
+  }
+  .tab.on {
+    color: var(--ink);
+    font-weight: 600;
+    border-bottom-color: var(--accent);
+  }
+  .depth {
+    font: inherit;
+    font-size: 12px;
+    border: 1px solid var(--rule-soft);
+    background: var(--paper-2);
+    color: var(--ink);
+    padding: 0 4px;
   }
   .counts {
     display: flex;
@@ -971,11 +1094,10 @@
     padding: 7px 8px;
     margin: 0 -8px;
     border-top: 1px solid var(--rule-soft);
-    transition: background 150ms ease, box-shadow 150ms ease;
+    transition: background 90ms linear;
   }
   .row.hot {
-    background: var(--route-band);
-    box-shadow: inset 3px 0 0 var(--route-main);
+    background: var(--press);
   }
   .peer {
     display: block;
@@ -1051,6 +1173,6 @@
     color: var(--ink-3);
   }
   .mark {
-    color: var(--route-main);
+    color: var(--accent);
   }
 </style>

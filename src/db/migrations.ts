@@ -6,7 +6,6 @@
 
 import { SqliteDatabase } from './sqlite-adapter';
 import { referenceNameTail, MEMBER_TAIL_SQL, MODULE_PARKED_SQL } from './reference-tail';
-import { repairPinableSchema } from './pinable-schema';
 
 /**
  * Current schema version
@@ -356,16 +355,6 @@ function recordMigration(db: SqliteDatabase, version: number, description: strin
  * v1 and the current version, and a rewound one replays what is above it.
  */
 export function runMigrations(db: SqliteDatabase, fromVersion: number): void {
-  // Fork repairs inspect schema features rather than consuming upstream version
-  // numbers. Existing Pinable v10/v12 history rows must stay intact.
-  if (fromVersion <= CURRENT_SCHEMA_VERSION) {
-    repairPinableSchema(db, fromVersion, (version) => {
-      const migration = migrations.find((item) => item.version === version);
-      if (!migration) throw new Error(`Missing upstream migration ${version} for Pinable repair`);
-      migration.up(db);
-    });
-  }
-
   const pending = migrations.filter((m) => m.version > fromVersion);
 
   if (pending.length === 0) {

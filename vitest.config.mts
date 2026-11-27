@@ -87,7 +87,7 @@ export default defineConfig({
               replacement: fileURLToPath(new URL('./__tests__/lazy-frameworks-eager.ts', import.meta.url)),
             },
           ],
-          exclude: ['**/node_modules/**', '**/dist/**', '__tests__/ui-package.test.ts', '__tests__/ui-i18n.test.ts', '__tests__/ui-theme-preference.test.ts', '__tests__/ui-guide.test.ts', '__tests__/ui-legend-i18n.test.ts'],
+          exclude: ['**/node_modules/**', '**/dist/**', '__tests__/ui-package.test.ts'],
         },
       },
       {
@@ -101,7 +101,7 @@ export default defineConfig({
         test: {
           name: 'ui',
           globals: true,
-          include: ['__tests__/ui-package.test.ts', '__tests__/ui-i18n.test.ts', '__tests__/ui-theme-preference.test.ts', '__tests__/ui-guide.test.ts', '__tests__/ui-legend-i18n.test.ts'],
+          include: ['__tests__/ui-package.test.ts'],
           environment: 'jsdom',
           server: {
             deps: {

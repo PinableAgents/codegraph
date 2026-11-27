@@ -66,13 +66,11 @@ import {
 } from './flow-model';
 import {
   isEdgeVisible,
-  portPoint,
   moduleMetaLabel,
   type MapEdgeLayout,
   type MapLayout,
   type MapNodeLayout,
 } from './map-model';
-import { mapEdgePath, type MapEdgeStyle } from './map-edge-path';
 import { tokensByLine, type Token } from './highlight';
 import { assignRefs, basename, type LineRef } from './symbol-model';
 import { kindLetter, FILLED_KINDS } from './kinds';
@@ -86,23 +84,19 @@ import { kindLetter, FILLED_KINDS } from './kinds';
  * reader's theme into a dark image on a white page.
  */
 export const EXPORT_COLORS = {
-  paper: '#f3f6f2',
-  paper2: '#eaf0eb',
-  press: '#dfe9e3',
-  ink: '#122026',
-  ink2: '#41555c',
-  ink3: '#566b72',
-  ink4: '#7f9296',
-  ruleSoft: '#b9c8c4',
-  ruleFaint: '#dce6e2',
-  accent: '#b66a00',
-  accentSoft: '#f5e8c9',
-  accentLine: '#cf9b43',
-  routeMain: '#b66a00',
-  routeBranch: '#147c98',
-  routeReturn: '#b8443e',
-  routeMuted: '#7f9296',
-  codeComment: '#566b72',
+  paper: '#f7f6f2',
+  paper2: '#f1efe8',
+  press: '#e8e6dd',
+  ink: '#16150f',
+  ink2: '#56544a',
+  ink3: '#87847a',
+  ink4: '#b4b1a5',
+  ruleSoft: '#d6d3c8',
+  ruleFaint: '#e6e3d9',
+  accent: '#7a2230',
+  accentSoft: '#f0e3e5',
+  accentLine: '#d9b3b9',
+  codeComment: '#6a675d',
 } as const;
 
 export const MONO_STACK =
@@ -365,16 +359,12 @@ function flowCardSvg(card: FlowCardLayout, dimmed: boolean, current: boolean): s
   const source = hop.source;
   const out: string[] = [];
   const clip = `c${card.column}-${Math.round(card.y)}`;
-  const stationKind = current ? 'main' : 'branch';
-  const stationColor = current ? EXPORT_COLORS.routeMain : EXPORT_COLORS.routeBranch;
 
   out.push(
     rect(card.x, card.y, card.width, card.height, {
       fill: EXPORT_COLORS.paper,
-      stroke: current ? EXPORT_COLORS.routeMain : EXPORT_COLORS.ruleSoft,
-    }),
-    `<line data-route-station="${stationKind}" x1="${round(card.x + 3)}" y1="${round(card.y)}" x2="${round(card.x + 3)}" y2="${round(card.y + card.height)}" stroke="${stationColor}" stroke-width="3" />`,
-    `<circle cx="${round(card.x + 3)}" cy="${round(card.y + card.height / 2)}" r="4" fill="${current ? stationColor : EXPORT_COLORS.paper}" stroke="${stationColor}" stroke-width="2" />`
+      stroke: current ? EXPORT_COLORS.accent : EXPORT_COLORS.ruleSoft,
+    })
   );
 
   // --- header --------------------------------------------------------------
@@ -685,17 +675,12 @@ function flowLinkSvg(
       ? `M${round(sx)},${round(sy)} L${round(tx)},${round(ty)}`
       : `M${round(sx)},${round(sy)} C${round((sx + tx) / 2)},${round(sy)} ${round((sx + tx) / 2)},${round(ty)} ${round(tx)},${round(ty)}`;
 
-  const routeColor = link.cap
-    ? EXPORT_COLORS.routeMuted
-    : dimmed
-      ? EXPORT_COLORS.routeBranch
-      : EXPORT_COLORS.routeMain;
   const out: string[] = [
-    `<path d="${path}" fill="none" stroke="${routeColor}" stroke-width="1.5"${link.dash ? ` stroke-dasharray="${link.dash}"` : ''} />`,
+    `<path d="${path}" fill="none" stroke="${EXPORT_COLORS.ink3}" stroke-width="1"${link.dash ? ` stroke-dasharray="${link.dash}"` : ''} />`,
   ];
   if (!link.cap) {
     out.push(
-      `<polygon points="${round(tx - 10)},${round(ty - 4)} ${round(tx - 2)},${round(ty)} ${round(tx - 10)},${round(ty + 4)}" fill="${routeColor}" />`
+      `<polygon points="${round(tx - 10)},${round(ty - 4)} ${round(tx - 2)},${round(ty)} ${round(tx - 10)},${round(ty + 4)}" fill="${EXPORT_COLORS.ink3}" />`
     );
   }
   const labelX = (sx + tx) / 2;
@@ -815,43 +800,24 @@ const LAYER_LABEL_SIZE = 12;
 const LAYER_RULE_BLEED = 12;
 
 export interface MapExportOptions extends ExportOptions {
-  edgeStyle?: MapEdgeStyle;
   /** The selected module, so the export draws the same edges the screen does. */
   selected?: string | null;
-  /** 与画布方向聚焦保持一致的高亮节点。 */
-  focused?: ReadonlySet<string> | null;
 }
 
 function mapNodeSvg(node: MapNodeLayout, selected: boolean, dimmed: boolean): string {
   const module = node.module;
-  const stationKind = selected ? 'main' : dimmed || node.generated ? 'muted' : 'branch';
-  const stationColor =
-    stationKind === 'main'
-      ? EXPORT_COLORS.routeMain
-      : stationKind === 'muted'
-        ? EXPORT_COLORS.routeMuted
-        : EXPORT_COLORS.routeBranch;
+  const strokeWidth = selected ? 2 : 1;
   const out: string[] = [
     rect(node.x, node.y, node.width, node.height, {
       fill: selected ? EXPORT_COLORS.press : EXPORT_COLORS.paper,
-      stroke: selected
-        ? EXPORT_COLORS.routeMain
-        : dimmed
-          ? EXPORT_COLORS.routeMuted
+      stroke: dimmed
+        ? EXPORT_COLORS.ink4
         : module.test
           ? EXPORT_COLORS.ink3
-          : EXPORT_COLORS.ruleSoft,
+          : EXPORT_COLORS.ink,
+      strokeWidth,
       dash: module.test ? '4 3' : undefined,
     }),
-    ...(selected
-      ? [
-          rect(node.x - 1, node.y - 1, node.width + 2, node.height + 2, {
-            stroke: EXPORT_COLORS.routeMain,
-          }),
-        ]
-      : []),
-    `<line data-route-station="${stationKind}" x1="${round(node.x + 3)}" y1="${round(node.y)}" x2="${round(node.x + 3)}" y2="${round(node.y + node.height)}" stroke="${stationColor}" stroke-width="3" />`,
-    `<circle cx="${round(node.x - 1)}" cy="${round(node.y + node.height / 2)}" r="4" fill="${selected ? stationColor : EXPORT_COLORS.paper}" stroke="${stationColor}" stroke-width="2" />`,
   ];
   const room = node.width - MODULE_PAD_X * 2;
   out.push(
@@ -890,28 +856,37 @@ function mapNodeSvg(node: MapNodeLayout, selected: boolean, dimmed: boolean): st
   return out.join('');
 }
 
+/** A port along a box's edge: `x = left + width x (i+1)/(n+1)`. */
+function portX(node: MapNodeLayout, handles: readonly string[], id: string): number {
+  const index = handles.indexOf(id);
+  const total = handles.length;
+  if (index < 0 || total === 0) return node.x + node.width / 2;
+  return node.x + (node.width * (index + 1)) / (total + 1);
+}
+
 function mapEdgeSvg(
   edge: MapEdgeLayout,
   from: MapNodeLayout,
   to: MapNodeLayout,
-  hot: boolean,
-  edgeStyle: MapEdgeStyle = 'curve'
+  hot: boolean
 ): string {
-  const path = mapEdgePath({
-    source: portPoint(from, edge.id, 'source'),
-    target: portPoint(to, edge.id, 'target'),
-  }, edgeStyle);
+  const sx = portX(from, from.sourceHandles, edge.id);
+  const sy = from.y + from.height;
+  const tx = portX(to, to.targetHandles, edge.id);
+  const ty = to.y;
+  const midY = (sy + ty) / 2;
+  const path = `M${round(sx)},${round(sy)} C${round(sx)},${round(midY)} ${round(tx)},${round(midY)} ${round(tx)},${round(ty)}`;
   if (edge.back) {
-    return `<path d="${path}" fill="none" stroke="${EXPORT_COLORS.routeReturn}" stroke-opacity="0.82" stroke-dasharray="4 3" stroke-width="${round(edge.width)}" marker-end="url(#map-arrow-return)" />`;
+    return `<path d="${path}" fill="none" stroke="${EXPORT_COLORS.accent}" stroke-opacity="0.6" stroke-dasharray="4 3" stroke-width="${round(edge.width)}" />`;
   }
-  return `<path d="${path}" fill="none" stroke="${hot ? EXPORT_COLORS.routeMain : EXPORT_COLORS.routeBranch}" stroke-opacity="${hot ? 0.95 : 0.48}" stroke-width="${round(edge.width)}" marker-end="url(#map-arrow-${hot ? 'main' : 'branch'})" />`;
+  return `<path d="${path}" fill="none" stroke="${EXPORT_COLORS.ink}" stroke-opacity="${hot ? 0.95 : 0.28}" stroke-width="${round(edge.width)}" />`;
 }
 
 /** The Map as a standalone SVG. */
 export function mapSvg(layout: MapLayout, options: MapExportOptions = {}): string {
   const selected = options.selected ?? null;
   const nodes = new Map(layout.nodes.map((n) => [n.id, n]));
-  const neighbours = options.focused ?? (
+  const neighbours =
     selected === null
       ? null
       : new Set<string>([
@@ -919,7 +894,7 @@ export function mapSvg(layout: MapLayout, options: MapExportOptions = {}): strin
           ...layout.edges.flatMap((e) =>
             e.source === selected ? [e.target] : e.target === selected ? [e.source] : []
           ),
-        ]));
+        ]);
 
   // Bounds come from the boxes, and the layer rules are then drawn to fit THEM
   // — not to `layout.width`, which carries the canvas' own generous padding and
@@ -969,7 +944,7 @@ export function mapSvg(layout: MapLayout, options: MapExportOptions = {}): strin
     const from = nodes.get(edge.source);
     const to = nodes.get(edge.target);
     if (!from || !to) continue;
-    body.push(mapEdgeSvg(edge, from, to, selected !== null && !edge.back, options.edgeStyle));
+    body.push(mapEdgeSvg(edge, from, to, selected !== null && !edge.back));
   }
   for (const node of layout.nodes) {
     body.push(
@@ -979,7 +954,7 @@ export function mapSvg(layout: MapLayout, options: MapExportOptions = {}): strin
 
   return document_(
     { minX: ruleLeft, minY, width: ruleRight - ruleLeft, height: maxY - minY },
-    [['branch', EXPORT_COLORS.routeBranch], ['main', EXPORT_COLORS.routeMain], ['return', EXPORT_COLORS.routeReturn]].map(([id, color]) => `<marker id="map-arrow-${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto"><polygon points="1,1 9,5 1,9" fill="${color}" /></marker>`).join(''),
+    '',
     body.join('\n'),
     options
   );

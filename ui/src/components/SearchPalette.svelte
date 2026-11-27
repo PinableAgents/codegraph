@@ -16,7 +16,6 @@
    */
   import PalettePanel from './PalettePanel.svelte';
   import { palette } from '../lib/palette.svelte';
-  import { i18n, localize } from '../lib/i18n.svelte';
   import type { PaletteItem } from '../lib/search-model';
   import { fileHref, flowHref, navigate } from '../lib/navigation';
   import { openEntryTarget, walkTo } from '../lib/walk';
@@ -30,8 +29,8 @@
   }
 
   let {
-    placeholder = i18n.t('search.placeholder'),
-    label = i18n.t('search.label'),
+    placeholder = 'Search a symbol or file, or ask “how does execute reach getFile” — press / to focus',
+    label = 'Search symbols and files',
     onpick,
   }: Props = $props();
 
@@ -132,7 +131,7 @@
 
 <svelte:window {onpointerdown} />
 
-<div class="search" role="search" bind:this={box} use:localize>
+<div class="search" role="search" bind:this={box}>
   <input
     bind:this={input}
     bind:value={palette.query}
@@ -173,8 +172,7 @@
   }
 
   #q:focus {
-    border-color: var(--route-main);
-    box-shadow: inset 3px 0 0 var(--route-main);
+    border-color: var(--ink);
     outline: none;
   }
 
