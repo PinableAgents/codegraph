@@ -17,30 +17,20 @@
   the pointer means the line NEAREST it, not the one drawn last under it.
 -->
 <script lang="ts">
-  import { selectDropdown } from '../lib/dropdown';
-  import { touchesSelection, type RelationshipDirection } from '../lib/relationship-focus';
-  import { graphStatus } from '../lib/graph-status.svelte';
-  import DirectoryBrowser from '../components/graph/DirectoryBrowser.svelte';
-  import { getGraphAdapter } from '../lib/adapter';
-  import { readGraphHistory, saveGraphHistory } from '../lib/graph-history';
-  import VirtualList from '../components/graph/VirtualList.svelte';
-  import BudgetNotice from '../components/graph/BudgetNotice.svelte';
-  import { graphText } from '../lib/graph-copy';
-  import DetailPanel from '../components/graph/DetailPanel.svelte';
-  import { untrack } from 'svelte';
-  import { graphBudget } from '../lib/graph-budget';
-  import { requestLayout } from '../lib/graph-layout';
-  import GraphCanvas from '../components/graph/GraphCanvas.svelte';
-  import { graphScene } from '../lib/graph-adapters';
-  import type { Node, Edge } from '../lib/graph-scene';
+  import { SvelteFlow, Controls, type Node, type Edge, type Viewport } from '@xyflow/svelte';
+  import '@xyflow/svelte/dist/style.css';
+  import ScreenNode from '../components/screens/ScreenNode.svelte';
+  import ScreenEdge from '../components/screens/ScreenEdge.svelte';
   import KindGlyph from '../components/KindGlyph.svelte';
   import { fetchScreens, type WireScreensPayload, type WireScreenLink } from '../lib/api';
   import { live } from '../lib/live.svelte';
-  import { symbolHref, fileHref, navigate, stepsHref, mapHref } from '../lib/navigation';
-  import type { MapEdgeLayout } from '../lib/map-model';
+  import { symbolHref, fileHref, navigate, stepsHref } from '../lib/navigation';
+  import { isEdgeVisible, type MapEdgeLayout } from '../lib/map-model';
   import { commonTokens, conditionTokens, restTokens, scenarios, whenWords, type WordToken } from '../lib/conditions';
   import {
+    buildScreensModel,
     hoverPill,
+    nearestEdge,
     neighbourhood,
     pairId,
     placeLabels,
@@ -48,19 +38,18 @@
     type ScreensModel,
   } from '../lib/screens-model';
 
-  let visibleCounts = $state<{nodes:number;edges:number}|null>(null);
   let payload = $state<WireScreensPayload | null>(null);
-  let retry = $state(0);
   let error = $state<string | null>(null);
   let loading = $state(true);
   let selected = $state<string | null>(null);
-  let focusDirection = $state<RelationshipDirection>('both');
   let hovered = $state<{ edge: MapEdgeLayout; x: number; y: number } | null>(null);
   /** The panel row under the pointer: its edge on the canvas, and the one transition it names. */
   let panelHot = $state<{ edge: string; link: WireScreenLink } | null>(null);
   let stage = $state<HTMLDivElement | null>(null);
-  /** G6's pan and zoom, for turning a pointer position into a point on the canvas. */
+  /** Svelte Flow's pan and zoom, for turning a pointer position into a point on the canvas. */
+  let viewport = $state<Viewport | undefined>(undefined);
   /** How close, in screen pixels, the pointer must be to a line to mean it. */
+  const HOVER_REACH = 10;
 
   // The key stays open until the reader closes it; the choice survives a
   // reload but is per browser — a preference, not a fact about the project.
@@ -68,9 +57,9 @@
   let legendOpen = $state(readLegendOpen());
   function readLegendOpen(): boolean {
     try {
-      return localStorage.getItem(LEGEND_KEY) === 'open';
+      return localStorage.getItem(LEGEND_KEY) !== 'closed';
     } catch {
-      return false;
+      return true;
     }
   }
   $effect(() => {
@@ -81,16 +70,20 @@
     }
   });
 
+  const FIT = { fitViewOptions: { padding: 0.1, maxZoom: 1, minZoom: 0.4 } };
+  /** Two clicks on one box closer than this are a double-click. */
+  const DOUBLE_CLICK_MS = 400;
+  let lastClick: { id: string; at: number } | null = null;
+  const nodeTypes = { screen: ScreenNode };
+  const edgeTypes = { screen: ScreenEdge };
 
   $effect(() => {
-    void retry;
     void live.indexTick;
     const controller = new AbortController();
     loading = true;
     error = null;
     fetchScreens(controller.signal)
       .then((next) => {
-        if (controller.signal.aborted) return;
         payload = next;
         loading = false;
       })
@@ -102,28 +95,16 @@
     return () => controller.abort();
   });
 
-  let scope = $state('');
-  const scopedPayload = $derived.by(() => {
-    if (!payload || !scope) return payload;
-    const links = payload.links.filter(link => link.from === scope || link.to === scope);
-    const ids = new Set([scope, ...links.flatMap(link => [link.from, link.to])]);
-    return { ...payload, screens: payload.screens.filter(n => ids.has(n.id)), origins: payload.origins.filter(n => ids.has(n.id)), links };
-  });
-  let computedModel = $state<ScreensModel | null>(null);
-  const model = $derived(computedModel);
-  const localBudget = $derived(scopedPayload ? graphBudget(scopedPayload.screens.length + scopedPayload.origins.length, scopedPayload.links.length) : null);
-  const budget = $derived((payload as (typeof payload & { budget?: { nodes: number; edges: number; exceeded: boolean } }))?.budget ?? localBudget);
-  $effect(() => {
-    const next = scopedPayload;
-    if (!next || !next.routed || budget?.exceeded) { computedModel = null; return; }
-    return requestLayout<ScreensModel>('screens', $state.snapshot(next), {}, result => computedModel = result, message => error = message);
-  });
+  const model = $derived<ScreensModel | null>(
+    payload === null || !payload.routed ? null : buildScreensModel(payload)
+  );
 
   const neighbours = $derived.by(() => {
     if (model === null || selected === null) return null;
     const set = new Set<string>([selected]);
     for (const edge of model.layout.edges) {
-      if (touchesSelection(edge, selected, focusDirection)) { set.add(edge.source); set.add(edge.target); }
+      if (edge.source === selected) set.add(edge.target);
+      if (edge.target === selected) set.add(edge.source);
     }
     return set;
   });
@@ -155,10 +136,22 @@
         selected: selected === node.id,
         dimmed: neighbours !== null && !neighbours.has(node.id),
         onSelect: (id: string) => {
-          selected = id;
+          // Two clicks on the same box within a beat are a double-click: what
+          // happens from here. Read here rather than off the DOM's `dblclick`,
+          // which the flow canvas does not always pass on.
+          const now = performance.now();
+          if (lastClick !== null && lastClick.id === id && now - lastClick.at < DOUBLE_CLICK_MS) {
+            lastClick = null;
+            navigate(stepsHref({ anchor: id }));
+            return;
+          }
+          lastClick = { id, at: now };
+          selected = selected === id ? null : id;
           hovered = null;
           panelHot = null;
         },
+        // Double-click: what happens from here — the screen's (or an origin's) Steps picture.
+        onOpen: (id: string) => navigate(stepsHref({ anchor: id })),
       },
     }));
   });
@@ -167,9 +160,9 @@
     if (model === null) return [];
     const focus = focusId;
     return model.layout.edges
-
+      .filter((edge) => isEdgeVisible(edge, selected))
       .map((edge) => {
-        const touches = touchesSelection(edge, selected, focusDirection);
+        const touches = selected !== null && (edge.source === selected || edge.target === selected);
         const isFocus = focus === edge.id;
         const hot = isFocus || touches;
         return {
@@ -192,7 +185,7 @@
             soft: hot && focus !== null && !isFocus,
             focus: isFocus,
             dimmed: selected !== null && !touches,
-            pill: touches ? pills?.pills.get(edge.id) ?? (isFocus ? focusPill : null) : (isFocus ? focusPill : null),
+            pill: pills?.pills.get(edge.id) ?? (isFocus ? focusPill : null),
             full: panelHot?.edge === edge.id ? fullText(panelHot.link) : null,
             onHover: onEdgeHover,
           },
@@ -206,6 +199,10 @@
   );
   const hoveredInfo = $derived(hovered === null || model === null ? null : (model.edges.get(hovered.edge.id) ?? null));
 
+  const edgeById = $derived(
+    model === null ? new Map<string, MapEdgeLayout>() : new Map(model.layout.edges.map((e) => [e.id, e]))
+  );
+  const visibleIds = $derived(new Set(edges.map((e) => e.id)));
 
   function onEdgeHover(edge: MapEdgeLayout | null, event: MouseEvent | null): void {
     if (edge === null || event === null || stage === null) {
@@ -224,10 +221,40 @@
    * The pointer on the canvas means the line nearest it. A pill speaks for
    * its own line; over a box, the key or the tooltip there is no line.
    */
+  function onStageMove(event: MouseEvent): void {
+    if (model === null || stage === null) return;
+    const target = event.target as Element | null;
+    if (target?.closest('.spill')) return;
+    if (target?.closest('.snode, .legend, .tip, .svelte-flow__controls')) {
+      hovered = null;
+      return;
+    }
+    const view = viewport ?? readViewport();
+    if (!view) return;
+    const box = stage.getBoundingClientRect();
+    const point = {
+      x: (event.clientX - box.left - view.x) / view.zoom,
+      y: (event.clientY - box.top - view.y) / view.zoom,
+    };
+    const hit = nearestEdge(model, point, visibleIds, HOVER_REACH / view.zoom);
+    const edge = hit === null ? undefined : edgeById.get(hit.id);
+    if (!edge) {
+      hovered = null;
+      return;
+    }
+    hovered = {
+      edge,
+      x: Math.min(event.clientX - box.left + 14, box.width - 360),
+      y: event.clientY - box.top + 14,
+    };
+  }
 
-
-  /** The transform G6 applied, for the moment before the binding has a value. */
-
+  /** The transform Svelte Flow applied, for the moment before the binding has a value. */
+  function readViewport(): Viewport | null {
+    const el = stage?.querySelector<HTMLElement>('.svelte-flow__viewport');
+    const m = el?.style.transform.match(/translate\(([-\d.]+)px,\s*([-\d.]+)px\)\s*scale\(([-\d.]+)\)/);
+    return m ? { x: Number(m[1]), y: Number(m[2]), zoom: Number(m[3]) } : null;
+  }
 
   /** The row under the pointer: light its line, and say the whole condition on it. */
   function onRowHover(link: WireScreenLink | null): void {
@@ -255,52 +282,18 @@
     const other = side === 'from' ? nameOf(link.from) : nameOf(link.to);
     return other;
   }
-  let selectionNotice = $state('');
-  $effect(() => {
-    const ids = model ? [...model.nodes.keys()] : null;
-    if (ids && selected && !ids.includes(selected)) { selected = null; selectionNotice = graphText('索引或筛选已变化，原选中节点不在当前图中。', 'The index or filters changed; the previous selection is no longer in this graph.'); }
-  });
-  const stateKey = typeof location === 'undefined' ? '' : location.href;
-  const restored = untrack(() => readGraphHistory(stateKey));
-  if (restored.selected) selected = restored.selected;
-  focusDirection = restored.analysisDirection ?? 'both';
-  scope = restored.scope ?? '';
-  $effect(() => saveGraphHistory(stateKey, { selected, scope }));
-
-  $effect(() => {
-    if (!payload) return;
-    return graphStatus.set({ nodes: visibleCounts?.nodes ?? nodes.length, edges: visibleCounts?.edges ?? edges.length, scope: scope || graphText('所有页面', 'All screens'), filter: scope ? graphText('一跳范围', 'One-hop scope') : undefined, excluded: payload.dropped ? `${payload.dropped} ${graphText('未归属导航', 'unattributed transitions')}` : undefined,
-      budget: budget?.exceeded ? graphText('超过画布预算，请缩小范围', 'Canvas budget exceeded; narrow scope') : '400 / 2000',
-    });
-  });
-  const canvasScene = $derived(graphScene('screens', nodes, edges, {}, scopedPayload?.links.map(link=>({id:link.id,source:link.from,target:link.to})),
-    model ? [...new Set([...model.nodes.values()].flatMap(n => n.screen?.file ? [n.screen.file] : []))].map(file => ({ id: 'page:' + file, label: file, members: [...model.nodes.values()].filter(n => n.screen?.file === file).map(n => n.id) })).filter(g => g.members.length > 1) : []));
 </script>
 
 {#snippet words(tokens: WordToken[])}
   {#each tokens as t, i (i)}{#if i > 0}{' '}{/if}{#if t.kw}<b class="kw">{t.text}</b>{:else}{t.text}{/if}{/each}
 {/snippet}
 
-<div class="graph-shell">
-{#if selectionNotice}<div role="status">{selectionNotice}</div>{/if}
-<div class="scopebar" role="toolbar" aria-label={graphText('页面图范围', 'Screens scope')}>
-  <label>{graphText('范围', 'Scope')} <select use:selectDropdown bind:value={scope}><option value="">{graphText('所有页面', 'All screens')}</option>{#each payload?.screens ?? [] as screen (screen.id)}<option value={screen.id}>{screen.path}</option>{/each}</select></label>
-  <label>{graphText('一跳方向', 'One-hop direction')} <select use:selectDropdown bind:value={focusDirection}><option value="both">{graphText('双向', 'Both')}</option><option value="in">{graphText('进入此页', 'Incoming')}</option><option value="out">{graphText('离开此页', 'Outgoing')}</option></select></label>
-  <button disabled={!selected} onclick={() => scope = selected ?? ''}>{graphText('聚焦选中一跳', 'Focus one hop')}</button>
-  <button disabled={!scope} onclick={() => scope = ''}>{graphText('重置范围', 'Reset scope')}</button>
-  <button disabled={!selected} onclick={() => selected && navigate(stepsHref({ anchor: selected }))}>{graphText('查看此处步骤', 'Read steps from here')}</button>
-</div>
 <div class="screens">
-  <div class="stage" bind:this={stage} role="presentation" onmouseleave={() => (hovered = null)}>
-    {#if error && model}<div class="retry-banner" role="alert">{error} <button onclick={() => retry++}>{graphText('重试', 'Retry')}</button></div>{/if}
-    {#if budget?.exceeded}
-      <div class="budget-scope"><BudgetNotice nodes={budget.nodes} edges={budget.edges} />
-        {#if getGraphAdapter().browse}<p>{graphText('从目录或文件继续分析；选择目录将打开对应架构图。', 'Continue through directories or files; choosing a directory opens its architecture map.')}</p><DirectoryBrowser root="" onOpen={(root) => navigate(mapHref({ root, depth: 1, tests: false }))} />{/if}
-      </div>
-    {:else if error !== null && model === null}
+  <div class="stage" bind:this={stage} role="presentation" onmousemove={onStageMove} onmouseleave={() => (hovered = null)}>
+    {#if error !== null}
       <div class="state">
         <h2>The screens could not be read</h2>
-        <p>{error}</p><button onclick={() => retry++}>{graphText('重试', 'Retry')}</button>
+        <p>{error}</p>
       </div>
     {:else if loading && payload === null}
       <div class="state"><p class="dim">Reading screens and transitions…</p></div>
@@ -315,8 +308,29 @@
         </p>
       </div>
     {:else if model !== null}
-      <GraphCanvas scene={canvasScene} onVisibleChange={counts=>visibleCounts=counts} {selected} bind:direction={focusDirection}
-        onSelect={id => { selected = id; hovered = null; panelHot = null; }} />
+      <SvelteFlow
+        {nodes}
+        {edges}
+        {nodeTypes}
+        {edgeTypes}
+        fitView
+        {...FIT}
+        bind:viewport
+        minZoom={0.2}
+        maxZoom={3}
+        nodesDraggable={false}
+        nodesConnectable={false}
+        elementsSelectable={false}
+        panOnDrag
+        proOptions={{ hideAttribution: true }}
+        onpaneclick={() => {
+          selected = null;
+          hovered = null;
+          panelHot = null;
+        }}
+      >
+        <Controls position="bottom-right" showLock={false} />
+      </SvelteFlow>
 
       <!-- The key, on the picture it explains. Each row draws the actual
            stroke or box, not a word for it — a reader matches shapes, not
@@ -336,8 +350,8 @@
               <span>Destination inferred from a helper's return value</span>
             </div>
             <div class="lrow">
-              <svg width="44" height="12" aria-hidden="true"><path d="M2 6 H42" class="k-line" /></svg>
-              <span>{graphText('箭头表示真实跳转方向；在分析菜单中定位循环', 'Arrows show the real transition direction; cycles are identified in Analyze')}</span>
+              <svg width="44" height="12" aria-hidden="true"><path d="M2 6 H42" class="k-line k-back" /></svg>
+              <span>Goes back up the picture (returning) — leaves the top of its box, arrives at the bottom of the other</span>
             </div>
             <div class="lrow">
               <span class="k-label mono">→ …x</span>
@@ -352,7 +366,7 @@
             </div>
             <div class="lrow">
               <span class="k-box k-entry mono"><span class="mark">●</span>/</span>
-              <span>{graphText('入口页面；分层布局中每向下一层就多一次跳转', 'Entry screen; in the hierarchical layout each layer is one more transition away')}</span>
+              <span>The entry screen; each row down is one more transition away</span>
             </div>
             <div class="lrow">
               <span class="k-box k-origin mono">fn()</span>
@@ -383,7 +397,7 @@
   </div>
 
   {#if payload !== null && model !== null}
-    <DetailPanel><aside class="side">
+    <aside class="side">
       {#if selectedInfo !== null && lists !== null}
         <div class="head">
           <div>
@@ -410,14 +424,13 @@
           </p>
         {/if}
 
-        {#if focusDirection !== 'out'}
         <h4>Opens from <span class="dim">{lists.opensFrom.length}</span></h4>
         {#if lists.opensFrom.length === 0}
           <p class="dim">
             {selectedInfo.entry ? 'The entry screen — the app starts here.' : 'Nothing in the graph navigates here.'}
           </p>
         {/if}
-        <VirtualList items={lists.opensFrom} rowHeight={100}>{#snippet row(link)}
+        {#each lists.opensFrom as link (link.id)}
             {@const sc = scenarios(link.sites)}
           <div
             class="row"
@@ -441,13 +454,11 @@
               </div>
             {/each}
           </div>
-        {/snippet}</VirtualList>
+        {/each}
 
-        {/if}
-        {#if focusDirection !== 'in'}
         <h4>Goes to <span class="dim">{lists.goesTo.length}</span></h4>
         {#if lists.goesTo.length === 0}<p class="dim">No navigation leaves this screen.</p>{/if}
-        <VirtualList items={lists.goesTo} rowHeight={100}>{#snippet row(link)}
+        {#each lists.goesTo as link (link.id)}
             {@const sc = scenarios(link.sites)}
           <div
             class="row"
@@ -473,8 +484,7 @@
               </div>
             {/each}
           </div>
-        {/snippet}</VirtualList>
-        {/if}
+        {/each}
       {:else}
         <div class="head"><div class="big">Screens</div></div>
         <p>
@@ -482,10 +492,17 @@
             · <b>{payload.origins.length}</b> triggered outside a screen{/if}.
         </p>
         <p class="dim">
-          <span class="mark">●</span> {graphText('默认从入口页面逐层展示跳转，也可切换力导向、同心圆或环形。选中页面查看相邻关系，悬停连线或详情行查看条件及调用来源。', 'The default layout layers transitions from entry screens; force-directed, concentric and circular layouts are also available. Select a screen for adjacent relationships; hover an edge or detail row for conditions and call origins.')}
+          <span class="mark">●</span> The entry screen is at the top; each row down is one more
+          transition away from it. Click a screen and each of its transitions is labelled at the far
+          end of its line — beside the screen it leads to or comes from — with the last condition
+          checked before it happens; hover the line, or its row here, for the whole chain and the
+          calls it travels through.
         </p>
         <p class="dim">
-          {graphText('实线表示直接跳转，虚线表示经返回值等方式推导的关系。箭头保留跳转方向，循环由真实有向关系计算。虚线节点表示共享入口、未到达页面或页面边界。', 'Solid edges represent direct transitions; dashed edges represent synthesized relationships. Arrows retain navigation direction; cycles are computed from real directed relationships. Dashed nodes indicate shared origins, unreached screens or boundaries.')}
+          Solid: the destination is written at the call. Dashed grey: it comes back from a
+          helper's return value (inferred). Dashed accent: a transition back up the picture
+          (returning), drawn around the boxes rather than through them. Dashed box: a trigger that
+          is not a screen — shared chrome, or code no screen's render chain reaches.
         </p>
         {#if model.unreached > 0}
           <p class="dim">
@@ -504,35 +521,48 @@
           >
         {/each}
       {/if}
-    </aside></DetailPanel>
+    </aside>
   {/if}
 </div>
 
-</div>
-
 <style>
-  .budget-scope{height:100%;overflow:auto;padding:0 24px;max-width:700px}.budget-scope p{font:14px/1.6 var(--sans);color:var(--ink-2)}
-  .retry-banner{position:absolute;top:60px;left:12px;right:12px;z-index:12;background:var(--paper-2);border:1px solid var(--rule);padding:10px;font:12px var(--sans)}
-  .graph-shell{display:flex;flex-direction:column;height:100%;min-height:0;overflow:hidden}
-  .scopebar{flex:none}
-  .scopebar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--rule);background:var(--paper-2);font:14px var(--sans)}.scopebar select,.scopebar button{min-height:36px;border:1px solid var(--rule);color:var(--ink);background:var(--paper);padding:4px;font:inherit}
-
   .screens {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    position: relative;
-    height: auto;
-    flex: 1;
+    grid-template-columns: minmax(600px, 1fr) 340px;
+    height: 100%;
     min-height: 0;
   }
   .stage {
     position: relative;
     overflow: hidden;
-    background-color: var(--paper);
-    background-image:
-      linear-gradient(var(--route-grid) 1px, transparent 1px),
-      linear-gradient(90deg, var(--route-grid) 1px, transparent 1px);
-    background-size: 24px 24px;
+    background: var(--paper);
+  }
+  .stage :global(.svelte-flow) {
+    background: var(--paper);
+  }
+  .stage :global(.svelte-flow__handle) {
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+    min-width: 0;
+    min-height: 0;
+    border: 0;
+    pointer-events: none;
+  }
+  /* The label layer covers the canvas; only the pills in it take the pointer,
+     never the empty paper between them — the lines underneath do. */
+  .stage :global(.svelte-flow__edge-labels) {
+    pointer-events: none;
+  }
+  .stage :global(.svelte-flow__controls-button) {
+    background: var(--paper);
+    border: 0;
+    border-bottom: 1px solid var(--rule-soft);
+    border-radius: 0;
+    color: var(--ink-2);
+  }
+  .stage :global(.svelte-flow__controls-button svg) {
+    fill: var(--ink-2);
   }
   .state {
     padding: 48px 40px;
@@ -548,8 +578,8 @@
     bottom: 12px;
     z-index: 4;
     max-width: 380px;
-    border: 1px solid var(--route-branch);
-    background: var(--paper-2);
+    border: 1px solid var(--rule);
+    background: var(--paper);
     font-size: 11.5px;
     color: var(--ink-2);
   }
@@ -580,13 +610,18 @@
     justify-content: center;
   }
   .k-line {
-    stroke: var(--route-branch);
-    stroke-opacity: 0.8;
+    stroke: var(--ink);
+    stroke-opacity: 0.6;
     stroke-width: 1.5;
     fill: none;
   }
   .k-line.k-synth {
     stroke-dasharray: 5 3;
+  }
+  .k-line.k-back {
+    stroke: var(--accent);
+    stroke-opacity: 0.8;
+    stroke-dasharray: 4 3;
   }
   .k-label {
     font-size: 10.5px;
@@ -595,7 +630,7 @@
   .k-box {
     box-sizing: border-box;
     padding: 1px 5px;
-    border: 1px solid var(--route-branch);
+    border: 1px solid var(--ink);
     font-size: 10.5px;
     color: var(--ink);
     line-height: 14px;
@@ -619,9 +654,9 @@
     z-index: 5;
     width: 340px;
     padding: 8px 10px;
-    border: 1px solid var(--route-main);
-    background: var(--paper-2);
-    box-shadow: inset 3px 0 0 var(--route-main);
+    border: 1px solid var(--ink);
+    background: var(--paper);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
     font-size: 12px;
     pointer-events: none;
     /* A long via chain or condition wraps inside the box. */
@@ -636,12 +671,10 @@
     border-top: 1px solid var(--rule-soft);
   }
   .side {
-    border-left: 1px solid var(--route-branch);
+    border-left: 1px solid var(--rule);
     padding: 14px 16px;
     overflow: auto;
     font-size: 12.5px;
-    background: var(--paper-2);
-    box-shadow: inset 3px 0 0 color-mix(in srgb, var(--route-branch) 28%, transparent);
   }
   .head {
     display: flex;
@@ -653,8 +686,6 @@
   .big {
     font-size: 15px;
     font-weight: 600;
-    padding-left: 8px;
-    border-left: 3px solid var(--route-main);
   }
   .sub {
     display: flex;
@@ -668,7 +699,7 @@
     text-decoration: underline;
   }
   .act {
-    color: var(--accent-ink);
+    color: var(--accent);
   }
   .clear {
     border: 1px solid var(--rule);
@@ -694,11 +725,10 @@
     padding: 7px 8px;
     margin: 0 -8px;
     border-top: 1px solid var(--rule-soft);
-    transition: background 150ms ease, box-shadow 150ms ease;
+    transition: background 90ms linear;
   }
   .row.hot {
-    background: var(--route-band);
-    box-shadow: inset 3px 0 0 var(--route-main);
+    background: var(--press);
   }
   .peer {
     display: block;
@@ -755,6 +785,6 @@
     color: var(--ink-3);
   }
   .mark {
-    color: var(--route-main);
+    color: var(--accent);
   }
 </style>

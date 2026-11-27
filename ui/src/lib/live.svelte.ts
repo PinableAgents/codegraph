@@ -111,8 +111,6 @@ let close: (() => void) | null = null;
 let retry: ReturnType<typeof setTimeout> | null = null;
 let attempts = 0;
 let started = false;
-let epoch = 0;
-let listeners: AbortController | null = null;
 /** The installed adapter has no live channel. Nothing to connect, ever. */
 let unsupported = false;
 
@@ -181,10 +179,8 @@ function open(): void {
     return;
   }
 
-  const mine = epoch;
   close = subscribe({
     hello(event) {
-      if (mine !== epoch) return;
       const hello = event as LiveHello | null;
       if (!hello) return;
       // A hello is the only proof the stream is really working: a connection
@@ -196,22 +192,18 @@ function open(): void {
       degraded = hello.degraded;
     },
     changed(event) {
-      if (mine !== epoch) return;
       const changed = event as LiveChanged | null;
       if (changed) bumpDisk(changed);
     },
     index(event) {
-      if (mine !== epoch) return;
       const moved = event as LiveIndexEvent | null;
       if (moved) bumpIndex(moved);
     },
     degraded(event) {
-      if (mine !== epoch) return;
       const note = event as { reason: string } | null;
       if (note) degraded = note.reason;
     },
     error() {
-      if (mine !== epoch) return;
       connected = false;
       // Take the closer before calling it: a transport that calls `error`
       // again from inside its own teardown must not re-enter this.
@@ -235,7 +227,6 @@ function open(): void {
 function start(): void {
   if (started || typeof window === 'undefined') return;
   started = true;
-  listeners = new AbortController();
 
   document.addEventListener('visibilitychange', () => {
     if (hidden()) return;
@@ -247,16 +238,16 @@ function start(): void {
       attempts = 0;
       open();
     }
-  }, { signal: listeners.signal });
+  });
   window.addEventListener('focus', () => {
     if (!stopped) return;
     attempts = 0;
     open();
-  }, { signal: listeners.signal });
+  });
   window.addEventListener('pagehide', () => {
     close?.();
     close = null;
-  }, { signal: listeners.signal });
+  });
 
   open();
 }
@@ -264,13 +255,6 @@ function start(): void {
 /* ----------------------------------------------------------------- store -- */
 
 export const live = {
-  stop(): void {
-    epoch++; listeners?.abort(); listeners = null; close?.(); close = null;
-    if (retry !== null) clearTimeout(retry); retry = null;
-    started = false; attempts = 0; unsupported = false; stopped = false; connected = false;
-    degraded = null; watching = null; lastIndex = null; lastChanged = null;
-    indexTick = 0; diskTick = 0; deferredIndex = false; deferredDisk = false;
-  },
   get connected(): boolean {
     return connected;
   },

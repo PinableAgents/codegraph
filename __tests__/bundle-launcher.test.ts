@@ -82,6 +82,21 @@ describe('bundled launchers (#1278)', () => {
     checkForwarding(stage().bundle);
   });
 
+  // Some agent harnesses turn Git Bash's path conversion off for the terminal
+  // they give the agent. node.exe then received the launcher's /c/... path to
+  // codegraph.js as is, read it as C:\c\..., and failed with MODULE_NOT_FOUND.
+  it.runIf(windows)('runs from Git Bash with path conversion turned off (#3464)', () => {
+    const { bundle } = stage();
+    probe(bundle);
+    const result = invoke(bundle, 'codegraph "$@"', ['--version', 'two words'], {
+      MSYS_NO_PATHCONV: '1',
+      MSYS2_ARG_CONV_EXCL: '*',
+    });
+    expect(result.stderr).not.toContain('Cannot find module');
+    expect(result.status, result.stderr).toBe(23);
+    expect(JSON.parse(result.stdout).args).toEqual(['--version', 'two words']);
+  });
+
   it.runIf(windows)('runs the real CLI and prompt hook in Git Bash, and keeps cmd and PowerShell working', () => {
     const { bundle } = stage();
     fs.rmSync(path.join(bundle, 'lib/dist'), { recursive: true });
@@ -92,6 +107,13 @@ describe('bundled launchers (#1278)', () => {
     expect(result.stdout.trim()).toBe(version);
     const hook = invoke(bundle, 'codegraph prompt-hook', [], {}, '{"prompt":"test"}\n');
     expect(hook.status, hook.stderr).toBe(0);
+    // The same with Git Bash's path conversion turned off (#3464).
+    const noConversion = { MSYS_NO_PATHCONV: '1', MSYS2_ARG_CONV_EXCL: '*' };
+    const unconverted = invoke(bundle, 'codegraph --version', [], noConversion);
+    expect(unconverted.status, unconverted.stderr).toBe(0);
+    expect(unconverted.stdout.trim()).toBe(version);
+    const unconvertedHook = invoke(bundle, 'codegraph prompt-hook', [], noConversion, '{"prompt":"test"}\n');
+    expect(unconvertedHook.status, unconvertedHook.stderr).toBe(0);
     const bin = path.join(bundle, 'bin');
     for (const [exe, args] of [
       ['cmd.exe', ['/d', '/s', '/c', 'codegraph --version']],
@@ -126,19 +148,15 @@ describe('bundled launchers (#1278)', () => {
 
 describe('bundled Node runtime (#2617)', () => {
   it('ships a Node 24 release with the fix for the Windows abort at exit', () => {
-    // Pinable publishes through runtime.py, not the upstream build-bundle.sh
-    // recipe. Guard the configured runtime and the active publishing path.
-    const config = JSON.parse(fs.readFileSync(path.resolve('.pinable/runtime.json'), 'utf8'));
-    const workflow = fs.readFileSync(path.resolve('.github/workflows/pinable-desktop-runtime.yml'), 'utf8');
-    expect(workflow).toContain('python scripts/pinable/runtime/runtime.py bundle');
-    expect(workflow).toContain('python scripts/pinable/runtime/runtime.py verify --target');
-    for (const target of ['win32-x64', 'win32-arm64']) {
-      expect(config.targets).toContain(target);
-      expect(workflow).toContain(`target: ${target}`);
-    }
+    // The release workflow passes only the target, so the recipe's default
+    // version is the Node every release bundles.
+    const workflow = fs.readFileSync(path.resolve('.github/workflows/release.yml'), 'utf8');
+    const calls = workflow.match(/build-bundle\.sh[^\r\n]*/g) ?? [];
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) expect(call.trim()).toBe('build-bundle.sh "$t"');
 
-    const pin = /^v(\d+)\.(\d+)\.(\d+)$/.exec(config.nodeVersion);
-    expect(pin, 'nodeVersion in .pinable/runtime.json').not.toBeNull();
+    const pin = /^NODE_VERSION="\$\{2:-v(\d+)\.(\d+)\.(\d+)\}"\r?$/m.exec(recipe);
+    expect(pin, 'default NODE_VERSION in scripts/build-bundle.sh').not.toBeNull();
     const [major, minor] = pin!.slice(1, 3).map(Number);
     // The CLI refuses to run on Node 25 and later.
     expect(major).toBe(24);

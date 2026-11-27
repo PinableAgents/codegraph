@@ -12,7 +12,6 @@
   import { trails } from '../lib/trails.svelte';
   import { replacedTrail, trailNameProblem } from '../lib/trails-model';
   import { toast } from '../lib/toast.svelte';
-  import { localize } from '../lib/i18n.svelte';
 
   /** Matches `MAX_TRAIL_NAME` in `src/ui-server/api/trail-store.ts`. */
   const MAX_NAME = 120;
@@ -107,7 +106,7 @@
 <!-- One root element, always: the save form is a second row inside it rather
      than a sibling, so a host's layout still sees the trail bar as one box
      whose height grows only while the form is open. -->
-<div class="trailwrap" use:localize>
+<div class="trailwrap">
 <div class="trailbar">
   <span class="label">Trail</span>
 
@@ -200,7 +199,7 @@
     min-height: 0;
     flex-direction: column;
     background: var(--paper-2);
-    border-bottom: 1px solid var(--route-branch);
+    border-bottom: 1px solid var(--rule-soft);
   }
 
   .trailbar {
@@ -220,7 +219,6 @@
     margin-right: 10px;
     color: var(--ink-3);
     font-family: var(--sans);
-    font-weight: 600;
   }
 
   .empty {
@@ -237,7 +235,6 @@
     border: 1px solid transparent;
     font-family: var(--mono);
     font-size: 12px;
-    transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
   }
 
   .hop:hover {
@@ -246,20 +243,18 @@
   }
 
   .hop.cur {
-    color: var(--accent-ink);
-    border-color: var(--route-main);
+    color: var(--accent);
+    border-color: var(--accent-line);
     background: var(--paper);
-    box-shadow: inset 3px 0 0 var(--route-main);
   }
 
   .hop-arrow {
     padding: 0 2px;
-    color: var(--route-branch);
-    font-weight: 600;
+    color: var(--ink-3);
   }
 
   .hop-arrow.up {
-    color: var(--route-return);
+    color: var(--ink-2);
   }
 
   .spacer {
@@ -277,7 +272,7 @@
 
   .tb-btn:hover:not(:disabled) {
     color: var(--ink);
-    border-color: var(--route-main);
+    border-color: var(--ink);
   }
 
   .tb-btn:disabled {

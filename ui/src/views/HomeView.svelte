@@ -19,7 +19,6 @@
   import { buildEntryPalette, type PaletteItem } from '../lib/search-model';
   import { entryHref, fileHref, flowHref, navigate } from '../lib/navigation';
   import { openEntryTarget, walkTo } from '../lib/walk';
-  import { i18n } from '../lib/i18n.svelte';
 
   interface Props {
     project?: string | null;
@@ -64,8 +63,8 @@
   <div class="emptystate">
     <h2>Nothing selected</h2>
     <p>
-      {i18n.t('home.startReading', { project: project ?? 'CodeGraph' })}
-      <code>/</code> {i18n.t('home.focusSearch')}
+      Search for a symbol or a file to start reading{project ? ` in ${project}` : ''}. Press
+      <code>/</code> to focus the search box.
     </p>
     <p>
       Every symbol you open shows who calls it on the left, its verbatim source in the middle, and

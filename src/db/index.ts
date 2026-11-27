@@ -227,9 +227,7 @@ export class DatabaseConnection {
     if (options.readOnly) return conn;
     const currentVersion = getCurrentVersion(db);
 
-    // A current upstream database can still lack fork-only cursor indexes.
-    // Read-only connections returned above; never repair a newer schema here.
-    if (currentVersion <= CURRENT_SCHEMA_VERSION) {
+    if (currentVersion < CURRENT_SCHEMA_VERSION) {
       runMigrations(db, currentVersion);
     }
 

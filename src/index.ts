@@ -60,7 +60,6 @@ import { loadDeprioritizePatterns } from './project-config';
 import { CodeGraphPackageVersion } from './mcp/version';
 import { extractSegmentSearchWords, segmentLookupVariants, splitIdentifierSegments } from './search/identifier-segments';
 import { createYielder } from './resolution/cooperative-yield';
-import { minRefsForPool } from './resolution/resolver-pool';
 
 // Re-export types for consumers
 export * from './types';
@@ -781,11 +780,15 @@ export class CodeGraph {
 
           // Fast-init leaves the DB in memory-journal (rollback) mode, where
           // the parallel resolver pool's read connections would contend with
-          // the main writer's exclusive commits. When the pool will actually
-          // run (enough pending refs), restore WAL BEFORE resolution so
-          // readers never block the writer; otherwise stay in the fast mode
-          // until the finally — sequential resolution has no readers.
-          if (fastInit && unresolvedCount >= minRefsForPool()) {
+          // the main writer's exclusive commits. The resolver calls this right
+          // before it starts the pool, whether before its first batch or
+          // mid-run, so WAL is back before any worker reads and readers never
+          // block the writer; a run that never starts one stays in the fast
+          // mode until the finally — sequential resolution has no readers.
+          let walForPool = false;
+          const beforePool = fastInit ? (): void => {
+            if (walForPool) return;
+            walForPool = true;
             try {
               this.db.getDb().pragma('synchronous = NORMAL');
               this.db.getDb().pragma('journal_mode = WAL');
@@ -807,8 +810,8 @@ export class CodeGraph {
                 options.verbose ? (m) => console.log(`[wal-valve] ${m}`) : undefined
               );
               walValve.start();
-            } catch { /* keep current mode; resolution still works sequentially */ }
-          }
+            } catch { /* keep current mode; the workers' reads just contend with the commits */ }
+          } : undefined;
 
           options.onProgress?.({
             phase: 'resolving',
@@ -832,9 +835,11 @@ export class CodeGraph {
                 total: totalPasses,
               });
             },
-            walValve ? () => walValve!.backpressure() : undefined,
+            // Looked up on each call: on a fresh index the valve only comes up with the pool.
+            walValve || beforePool ? () => walValve?.backpressure() ?? null : undefined,
             true,
-            true
+            true,
+            beforePool
           );
           if (process.env.CODEGRAPH_SYNTH_TIMINGS) console.error(`[phase-timing] resolution: ${Date.now() - tResolve}ms`);
           this.lastSynthesisAt = Date.now();
@@ -2342,11 +2347,14 @@ export class CodeGraph {
     synthesize: boolean = true,
     // The caller has just re-detected the frameworks on this index, so the
     // resolver pool's workers needn't each read the project again to do it.
-    frameworksCurrent: boolean = false
+    frameworksCurrent: boolean = false,
+    // Run right before the resolver pool starts (see resolveAndPersistBatched).
+    beforePool?: () => void
   ): Promise<ResolutionResult> {
     return this.resolver.resolveAndPersistBatched(onProgress, undefined, onSynthesisProgress, {
       dbPath: this.db.getPath(),
       shareFrameworks: frameworksCurrent,
+      beforePool,
       // Bulk-edge-load hooks: on big runs the resolver drops the non-unique
       // edge indexes for the batch loop and recreates them before synthesis
       // (which reads kind-keyed). Concurrent readers (a daemon serving this
@@ -2645,8 +2653,6 @@ export class CodeGraph {
       minConfidence: number;
       topPairsPerLink: number;
       pairKinds: readonly Edge['kind'][];
-      bounded?: boolean;
-      minWeight?: number;
     }
   ): ReturnType<QueryBuilder['aggregateModuleGraph']> {
     return this.queries.aggregateModuleGraph(assignments, options);
@@ -2656,14 +2662,6 @@ export class CodeGraph {
    * Every ordered pair of files where one reaches into the other. See
    * {@link QueryBuilder.getCrossFileDependencyPairs}.
    */
-  getUiFileDependencyPairs(files: string[], minConfidence: number, limit?: number) {
-    return this.queries.getUiFileDependencyPairs(files, minConfidence, limit);
-  }
-
-  getUiFileImportPairs(files: string[], limit?: number) {
-    return this.queries.getUiFileImportPairs(files, limit);
-  }
-
   getFileDependencyPairs(minConfidence = 0): Array<{ source: string; target: string }> {
     return this.queries.getCrossFileDependencyPairs(minConfidence);
   }
@@ -2722,26 +2720,6 @@ export class CodeGraph {
    * Used to enumerate every overload of a heavily-overloaded name so the specific
    * definition the caller wants is never dropped below a search cut.
    */
-  /** 工作台有界读取，不修改索引。 */
-  getUiSearchCandidates(parsed: Parameters<QueryBuilder['getUiSearchCandidates']>[0], limit: number): ReturnType<QueryBuilder['getUiSearchCandidates']> {
-    return this.queries.getUiSearchCandidates(parsed, limit);
-  }
-
-  /** 工作台有界读取，不修改索引。 */
-  getUiNeighborPage(id: string, direction: 'in' | 'out', after: number, limit: number): ReturnType<QueryBuilder['getUiNeighborPage']> {
-    return this.queries.getUiNeighborPage(id, direction, after, limit);
-  }
-
-  /** 工作台有界读取，不修改索引。 */
-  getUiSymbolPage(file: string, after: string, limit: number): ReturnType<QueryBuilder['getUiSymbolPage']> {
-    return this.queries.getUiSymbolPage(file, after, limit);
-  }
-
-  /** 工作台有界读取，不修改索引。 */
-  getUiBrowsePage(root: string, kind: 'directories' | 'files', after: string, limit: number): ReturnType<QueryBuilder['getUiBrowsePage']> {
-    return this.queries.getUiBrowsePage(root, kind, after, limit);
-  }
-
   getNodesByName(name: string): Node[] {
     return this.queries.getNodesByName(name);
   }

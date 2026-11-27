@@ -29,8 +29,9 @@
     note?: string;
     onSelect: (id: string) => void;
     /** Re-anchor the picture on this step — a double-click; absent for a step with no symbol. */
+    onStart?: (id: string) => void;
   }
-  let { info, project, selected, dimmed, size = null, note = '', onSelect }: Props = $props();
+  let { info, project, selected, dimmed, size = null, note = '', onSelect, onStart }: Props = $props();
   const step = $derived(info.step);
 
   const cutNote = $derived.by(() => {
@@ -61,8 +62,15 @@
   class:rail={size === null}
   style={size === null ? undefined : `width:${size.width}px;height:${size.height}px`}
   onclick={() => onSelect(info.id)}
+  ondblclickcapture={(e) => {
+    // The flow canvas zooms on a double-click that reaches its pane; a
+    // double-click on a box is a navigation, not a zoom — stop it here,
+    // at the target, before it bubbles. The pane's own double-click keeps zooming.
+    e.stopPropagation();
+    onStart?.(info.id);
+  }}
   aria-pressed={selected}
-  title={`${info.label} — ${step.anchor ? 'where this picture starts; ' : ''}${kindWord(step.kind, project, step)}. ${info.sub}.${note ? ` ${note}` : ''}${cutNote}`}
+  title={`${info.label} — ${step.anchor ? 'where this picture starts; ' : ''}${kindWord(step.kind, project, step)}. ${info.sub}.${note ? ` ${note}` : ''}${cutNote}${onStart && !step.anchor ? ' Double-click to start here.' : ''}`}
 >
   <span class="name"
     >{#if step.anchor}<span class="mark" aria-hidden="true">●</span>{/if}{info.label}{#if step.cut !== null}<span
@@ -75,35 +83,20 @@
 
 <style>
   .snode {
-    position: relative;
     display: flex;
     flex-direction: column;
     justify-content: center;
     gap: 1px;
     box-sizing: border-box;
     padding: 0 9px;
-    border: 1px solid var(--rule-soft);
+    border: 1px solid var(--ink);
     border-radius: 0;
     background: var(--paper);
     text-align: left;
     cursor: pointer;
     font: inherit;
     color: var(--ink);
-    box-shadow: inset 3px 0 0 var(--route-branch);
-    transition: background 150ms ease, border-color 150ms ease, box-shadow 150ms ease, color 150ms ease;
-  }
-  .snode::before {
-    content: '';
-    position: absolute;
-    left: -5px;
-    top: 50%;
-    width: 8px;
-    height: 8px;
-    border: 2px solid var(--route-branch);
-    border-radius: 50% !important;
-    background: var(--paper);
-    transform: translateY(-50%);
-    transition: border-color 150ms ease, background 150ms ease;
+    transition: background 90ms linear;
   }
   /* On the rail a box sizes to its words, and wears its padding itself. */
   .snode.rail {
@@ -113,30 +106,20 @@
   }
   .snode:hover,
   .snode.sel {
-    border-color: var(--route-main);
-    box-shadow: inset 3px 0 0 var(--route-main), 0 0 0 1px var(--route-main);
+    border-width: 2px;
+    padding: 0 8px;
   }
   .snode.rail:hover,
   .snode.rail.sel {
-    padding: 5px 9px;
+    padding: 4px 8px;
   }
   .snode:hover,
   .snode.sel {
-    background: var(--route-band);
-  }
-  .snode:hover::before,
-  .snode.sel::before,
-  .snode.anchor::before {
-    border-color: var(--route-main);
-    background: var(--route-main);
+    background: var(--press);
   }
   .snode.dimmed {
-    border-color: var(--rule-faint);
+    border-color: var(--ink-4);
     color: var(--ink-4);
-    box-shadow: inset 3px 0 0 var(--route-muted);
-  }
-  .snode.dimmed::before {
-    border-color: var(--route-muted);
   }
   .snode.dimmed .sub {
     color: var(--ink-4);
@@ -144,7 +127,7 @@
   /* The language changes under the code: a rule where it does. */
   .snode.k-bridge,
   .snode.k-event {
-    border-left: 3px solid var(--route-main);
+    border-left: 3px solid var(--accent);
     padding-left: 7px;
   }
   .snode.k-bridge:hover,
@@ -156,7 +139,7 @@
   }
   .snode.k-bridge.dimmed,
   .snode.k-event.dimmed {
-    border-left-color: var(--route-muted);
+    border-left-color: var(--accent-line);
   }
   .snode.k-store {
     background: var(--paper-2);
@@ -168,13 +151,7 @@
   /* Outside the index: a place the graph cannot follow into. */
   .snode.k-effect {
     border-style: dashed;
-    border-color: var(--route-muted);
-    box-shadow: none;
-  }
-  .snode.k-effect:hover,
-  .snode.k-effect.sel {
-    border-color: var(--route-main);
-    box-shadow: inset 3px 0 0 var(--route-main), 0 0 0 1px var(--route-main);
+    border-color: var(--ink-3);
   }
   .snode:focus-visible {
     outline: 2px solid var(--accent);
@@ -189,7 +166,7 @@
     max-width: 100%;
   }
   .mark {
-    color: var(--route-main);
+    color: var(--accent);
     margin-right: 5px;
     font-size: 9px;
     vertical-align: 1px;

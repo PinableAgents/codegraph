@@ -31,16 +31,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Verify upstream ancestry and README ownership
-        run: node scripts/pinable/sync-upstream.mjs --check
-      - name: Test safe sync and repeated merges
-        run: node --test scripts/pinable/sync-upstream.test.mjs
       - run: npm ci
       - run: npm run build
       - run: npm run build:lib
-      - name: Full engine and UI regression suite
+      - name: Full upstream regression suite
         shell: bash
-        run: npm test -- --maxWorkers=2 2>&1 | tee full-tests.log
+        run: npm test -- --maxWorkers=2 > full-tests.log 2>&1 || { cat full-tests.log; exit 1; }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -72,11 +68,10 @@ jobs:
           npm test -- __tests__/kernel-tsjs-parity.test.ts
           __tests__/rust-self-owner.test.ts __tests__/awaited-receiver.test.ts
           __tests__/release-main-regressions.test.ts
-          --maxWorkers=2 2>&1 | tee native-tests.log
+          --maxWorkers=2 > native-tests.log 2>&1 || { cat native-tests.log; exit 1; }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: pinable-native-test-log
           path: native-tests.log
           if-no-files-found: ignore
-

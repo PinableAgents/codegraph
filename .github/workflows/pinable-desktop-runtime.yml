@@ -1,8 +1,7 @@
 name: Pinable desktop runtimes
 
 on:
-  push:
-    branches: [main]
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -196,9 +195,8 @@ jobs:
 
   publish:
     needs: collect
-    if: >-
-      github.repository == 'PinableAgents/codegraph' && github.ref == 'refs/heads/main' &&
-      github.event_name == 'push'
+    # Opt back in only after Desktop can migrate from the legacy 1.6.5 release.
+    if: ${{ false }}
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     permissions:
@@ -219,5 +217,3 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python scripts/pinable/runtime/publish.py --directory artifacts --expected-commit "$GITHUB_SHA"
-
-
